@@ -1,6 +1,6 @@
 # État du code — Micro
 
-Mis à jour : 2026-11-01 (fin de Phase 4 : écran vivant, mascotte et météo)
+Mis à jour : 2026-11-01 (fin de Phase 5 : app Flutter, serveur WebSocket, écran plus fluide)
 
 ## Arborescence
 
@@ -495,6 +495,103 @@ Après un `reset` (pour relancer `main.py`), PAUSE toujours présent :
 ```
 
 Ensuite : `fs ls :` (`erreur.txt` toujours 524 octets), `tools\agent\PAUSE` supprimé, `reset` de la carte (l'agent en fond reprend COM4).
+
+## Dépendance et vérifications PC (Phase 5, étape 3)
+
+```
+> py -m pip install --user -U websockets
+Requirement already satisfied: websockets in C:\Users\xisda\AppData\Roaming\Python\Python313\site-packages (17.4)
+```
+
+websockets **17.4** (déjà installé et à jour ; pip 26.2.1 signale que 26.2.2 est disponible).
+
+```
+> py -m py_compile tools\agent\agent_pc.py tools\agent\serveur_app.py tools\assets\generer_assets.py esp\main.py esp\lib\ui.py
+(aucune sortie, code 0)
+> py -X utf8 -c "import sys; sys.path.insert(0, r'tools\agent'); import serveur_app as s; print(s.PORT, s.ServeurApp)"
+8765 <class 'serveur_app.ServeurApp'>
+```
+
+## Carte (Phase 5, étape 4)
+
+- `tools\agent\PAUSE` créé, attente 3 s.
+- `fs cp esp/main.py :main.py + fs cp esp/lib/ui.py :lib/ui.py` : ClearCommError au 1er essai, réussi au 2e (après 3 s). Dernière ligne de la trace :
+
+```
+serial.serialutil.SerialException: ClearCommError failed (PermissionError(13, 'The device does not recognize the command.', None, 22))
+```
+
+```
+ls :
+           0 assets/
+         139 boot.py
+         524 erreur.txt
+           0 lib/
+       10864 main.py
+ls :lib
+        6040 hid_pc.py
+        4071 lcd.py
+        5177 meteo.py
+        3495 polices.py
+       15781 ui.py
+           0 usb/
+```
+
+- `reset` (OK du 1er coup), puis lecture de COM4 pendant 10 s (pyserial, 115200, réouverture pendant le redémarrage USB) : **0 octet reçu**, aucune trace (`main.py` n'affiche rien au démarrage).
+
+```
+> py -X utf8 tools\pc_test.py COM4 --cmd "EVT PIN 123456"
+  -> OK
+> py -X utf8 tools\pc_test.py COM4 --cmd "EVT APP 1"
+  -> OK
+```
+
+- `fs ls :` → `erreur.txt` toujours 524 octets (anciennes traces 3-bis, aucune nouvelle erreur). `PAUSE` supprimé, `reset` de la carte.
+
+## App Flutter (Phase 5, étape 5)
+
+```
+> flutter pub get
+Resolving dependencies...
+Downloading packages...
+  cupertino_icons 1.0.9 (2.0.0 available)
+  material_color_utilities 0.13.0 (0.13.1 available)
+  meta 1.18.3 (1.19.0 available)
+  shared_preferences_foundation 2.5.7 (2.6.1 available)
+  test_api 0.7.12 (0.7.15 available)
+  vector_math 2.4.2 (2.4.4 available)
+Got dependencies!
+6 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+```
+
+```
+> flutter analyze
+Analyzing app...
+No issues found! (ran in 4.1s)
+```
+
+Aucune erreur, aucun avertissement, aucune « info ».
+
+```
+> flutter test
+00:00 +0: loading D:/FlutterProject/Esp32Maison/Micro/app/test/widget_test.dart
+00:00 +0: lecture de l'état envoyé par le PC
+00:00 +1: état vide
+00:00 +2: All tests passed!
+```
+
+```
+> flutter build apk --release
+Running Gradle task 'assembleRelease'...
+Warning: SDK processing. This version only understands SDK XML versions up to 3 but an SDK XML file of version 4 was encountered. This can happen if you use versions of Android Studio and the command-line tools that were released at different times.
+Font asset "MaterialIcons-Regular.otf" was tree-shaken, reducing it from 1645184 to 8776 bytes (99.5% reduction). Tree-shaking can be disabled by providing the --no-tree-shake-icons flag when building your app.
+Running Gradle task 'assembleRelease'...                          286,4s
+√ Built build\app\outputs\flutter-apk\app-release.apk (51.7MB)
+```
+
+- APK : `app\build\app\outputs\flutter-apk\app-release.apk`, **54 172 607 octets** (51,7 Mo).
+- Signée avec la clé debug (`signingConfig = signingConfigs.getByName("debug")` dans `app/android/app/build.gradle.kts`, inchangé).
 
 ## esp/main.py
 
@@ -1887,98 +1984,100 @@ if __name__ == "__main__":
     main()
 ```
 
-## app/pubspec.yaml (inchangé depuis la Phase 0)
+## app/pubspec.yaml (Phase 5)
 
 ```yaml
 name: esp_micro
-description: "A new Flutter project."
-# The following line prevents the package from being accidentally published to
-# pub.dev using `flutter pub publish`. This is preferred for private packages.
-publish_to: 'none' # Remove this line if you wish to publish to pub.dev
+description: "Télécommande PC — app de l'ESP32 Maison (projet Micro)."
+publish_to: 'none'
 
-# The following defines the version and build number for your application.
-# A version number is three numbers separated by dots, like 1.2.43
-# followed by an optional build number separated by a +.
-# Both the version and the builder number may be overridden in flutter
-# build by specifying --build-name and --build-number, respectively.
-# In Android, build-name is used as versionName while build-number used as versionCode.
-# Read more about Android versioning at https://developer.android.com/studio/publish/versioning
-# In iOS, build-name is used as CFBundleShortVersionString while build-number is used as CFBundleVersion.
-# Read more about iOS versioning at
-# https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
-# In Windows, build-name is used as the major, minor, and patch parts
-# of the product and file versions while build-number is used as the build suffix.
 version: 1.0.0+1
 
 environment:
   sdk: ^3.13.2
 
-# Dependencies specify other packages that your package needs in order to work.
-# To automatically upgrade your package dependencies to the latest versions
-# consider running `flutter pub upgrade --major-versions`. Alternatively,
-# dependencies can be manually updated by changing the version numbers below to
-# the latest version available on pub.dev. To see which dependencies have newer
-# versions available, run `flutter pub outdated`.
 dependencies:
   flutter:
     sdk: flutter
-
-  # The following adds the Cupertino Icons font to your application.
-  # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
+  web_socket_channel: ^3.0.3
+  shared_preferences: ^2.5.3
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-
-  # The "flutter_lints" package below contains a set of recommended lints to
-  # encourage good coding practices. The lint set provided by the package is
-  # activated in the `analysis_options.yaml` file located at the root of your
-  # package. See that file for information about deactivating specific lint
-  # rules and activating additional ones.
   flutter_lints: ^6.0.0
 
-# For information on the generic Dart part of this file, see the
-# following page: https://dart.dev/tools/pub/pubspec
-
-# The following section is specific to Flutter packages.
 flutter:
-
-  # The following line ensures that the Material Icons font is
-  # included with your application, so that you can use the icons in
-  # the material Icons class.
   uses-material-design: true
 
-  # To add assets to your application, add an assets section, like this:
-  # assets:
-  #   - images/a_dot_burr.jpeg
-  #   - images/a_dot_ham.jpeg
+  assets:
+    - assets/images/
 
-  # An image asset can refer to one or more resolution-specific "variants", see
-  # https://flutter.dev/to/resolution-aware-images
+  # Polices Inter : SIL Open Font License 1.1 (voir assets/fonts/LICENCE_POLICES.txt)
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-Medium.otf
+          weight: 500
+        - asset: assets/fonts/Inter-SemiBold.otf
+          weight: 600
+        - asset: assets/fonts/Inter-Bold.otf
+          weight: 700
+        - asset: assets/fonts/Inter-Black.otf
+          weight: 900
+```
 
-  # For details regarding adding assets from package dependencies, see
-  # https://flutter.dev/to/asset-from-package
+## app/android/app/src/main/AndroidManifest.xml (Phase 5)
 
-  # To add custom fonts to your application, add a fonts section here,
-  # in this "flutter" section. Each entry in this list should have a
-  # "family" key with the font family name, and a "fonts" key with a
-  # list giving the asset and other descriptors for the font. For
-  # example:
-  # fonts:
-  #   - family: Schyler
-  #     fonts:
-  #       - asset: fonts/Schyler-Regular.ttf
-  #       - asset: fonts/Schyler-Italic.ttf
-  #         style: italic
-  #   - family: Trajan Pro
-  #     fonts:
-  #       - asset: fonts/TrajanPro.ttf
-  #       - asset: fonts/TrajanPro_Bold.ttf
-  #         weight: 700
-  #
-  # For details regarding fonts from package dependencies,
-  # see https://flutter.dev/to/font-from-package
+```xml
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <application
+        android:label="Télécommande PC"
+        android:usesCleartextTraffic="true"
+        android:name="${applicationName}"
+        android:icon="@mipmap/ic_launcher">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:taskAffinity=""
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize">
+            <!-- Specifies an Android theme to apply to this Activity as soon as
+                 the Android process has started. This theme is visible to the user
+                 while the Flutter UI initializes. After that, this theme continues
+                 to determine the Window background behind the Flutter UI. -->
+            <meta-data
+              android:name="io.flutter.embedding.android.NormalTheme"
+              android:resource="@style/NormalTheme"
+              />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+        <!-- Don't delete the meta-data below.
+             This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
+        <meta-data
+            android:name="flutterEmbedding"
+            android:value="2" />
+    </application>
+    <!-- Required to query activities that can process text, see:
+         https://developer.android.com/training/package-visibility and
+         https://developer.android.com/reference/android/content/Intent#ACTION_PROCESS_TEXT.
+
+         In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.PROCESS_TEXT"/>
+            <data android:mimeType="text/plain"/>
+        </intent>
+    </queries>
+</manifest>
 ```
 
 ## hid.py installé

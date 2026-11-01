@@ -1,30 +1,28 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
-import 'package:flutter/material.dart';
+import 'package:esp_micro/etat.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:esp_micro/main.dart';
-
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  test('lecture de l\'état envoyé par le PC', () {
+    final e = EtatPC.depuisJson({
+      'cpu': 23,
+      'ram': 61,
+      'fps': 104,
+      'jeu': 'God of War Ragnarok',
+      'casque': 'HECATE G30',
+      'manette': true,
+      'meteo': [
+        {'icone': 'orage', 'tmax': 32, 'tmin': 24, 'pluie': 80, 'heure': 15},
+      ],
+    });
+    expect(e.cpu, 23);
+    expect(e.enJeu, isTrue);
+    expect(e.gpuTemp, -1);
+    expect(e.meteo.first.textePluie, 'Pluie 80 % vers 15 h');
+  });
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
-
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
-
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+  test('état vide', () {
+    final e = EtatPC.vide();
+    expect(e.recu, isFalse);
+    expect(e.enJeu, isFalse);
   });
 }

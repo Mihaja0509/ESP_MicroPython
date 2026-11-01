@@ -288,7 +288,7 @@ def casque_sur_tete(img):
         d.rounded_rectangle((x - 10, 330, x + 10, 380), 6, fill=GRIS_CASQUE, outline=CONTOUR, width=6)
 
 
-def perso(yeux="ouverts", bouche="normale", casque="cou"):
+def perso(yeux="ouverts", bouche="normale", casque="cou", taille=(PERSO_W, PERSO_H)):
     base = Image.new("RGBA", (1024, 1024), (0, 0, 0, 0))
     base.alpha_composite(corps(casque_au_cou=(casque == "cou")))
     base.alpha_composite(tete(yeux, bouche))
@@ -306,7 +306,7 @@ def perso(yeux="ouverts", bouche="normale", casque="cou"):
     o.alpha_composite(Image.fromarray(A))
     # cadrage fixe (le même pour toutes les images, pour qu'elles se superposent)
     o = o.crop((262, 44, 762, 834))
-    return o.resize((PERSO_W, PERSO_H), Image.LANCZOS)
+    return o.resize(taille, Image.LANCZOS)
 
 
 # ---------------------------------------------------------------------------
@@ -544,6 +544,15 @@ def main():
             planche.paste(im, (5 + i * (PERSO_W + 8), 5), im)
             i += 1
     planche.save(APERCUS / "mascotte.png")
+
+    print("Images pour l'app Flutter :")
+    dossier_app = ICI.parent.parent / "app" / "assets" / "images"
+    dossier_app.mkdir(parents=True, exist_ok=True)
+    for casque in ("cou", "oreilles"):
+        for nom, opts in images.items():
+            grand = perso(casque=casque, taille=(PERSO_W * 3, PERSO_H * 3), **opts)
+            grand.save(dossier_app / f"perso_{casque}_{nom}.png", optimize=True)
+            print(f"  perso_{casque}_{nom}.png")
 
     print("Icônes :")
     for nom, f in (("son", i_son), ("muet", i_muet), ("soleil", i_soleil), ("cadenas", i_cadenas),

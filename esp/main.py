@@ -115,6 +115,10 @@ def reaction_action(arg):
         ui.reagir("power", "Arrêt du PC…")
     elif nom == "ANNULER":
         ui.reagir("power", "Arrêt annulé")
+    elif nom == "TEXTE":
+        ui.reagir("clavier", "Texte envoyé")
+    elif nom == "VOL":
+        ui.reagir("son", "Volume %s %%" % reste)
     else:
         ui.reagir("appli", arg[:24])
 
@@ -199,6 +203,13 @@ def executer(ligne):
             evt["jeu"] = "" if val in ("", "-") else val
         elif typ == "ACTION":
             reaction_action(val)
+        elif typ == "PIN":
+            ui.reagir("coucou", "Code : %s" % val, duree=60000)
+        elif typ == "APP":
+            if val == "1":
+                ui.reagir("coucou", "Téléphone connecté")
+            else:
+                ui.reagir("power", "Téléphone déconnecté")
         else:
             return "ERR evenement inconnu : " + typ
         return "OK"

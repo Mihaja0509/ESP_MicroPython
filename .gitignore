@@ -11,3 +11,4 @@ __pycache__/
 tools/agent/PAUSE
 tools/agent/agent.log
 tools/agent/reglages.json
+tools/agent/appareils.json

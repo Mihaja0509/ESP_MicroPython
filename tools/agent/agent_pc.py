@@ -9,6 +9,9 @@
   ligne « PERF » chaque seconde.
 - Météo d'aujourd'hui et de demain (Open-Meteo) toutes les 30 min, lignes « METEO_J »
   (position dans tools\\agent\\reglages.json).
+- Serveur pour l'app Flutter du téléphone (WebSocket, port 8765, voir serveur_app.py) :
+  appairage par code affiché sur l'ESP32, souris / texte directement sur le PC, état 4 fois / s.
+- Mesures envoyées 4 fois par seconde (CPU, RAM, volume, GPU, FPS) pour un écran plus vif.
 - Envoie l'heure du PC (ligne « TEMPS ») à la connexion puis chaque minute.
 - Prévient l'ESP32 de chaque commande PC exécutée (« EVT ACTION … ») pour que la mascotte réagisse.
 - Exécute les commandes « PC » : ouvrir une app, luminosité, verrouiller, écran éteint,
@@ -59,11 +62,17 @@ except ImportError:
 
 import winreg
 
+try:
+    from serveur_app import PORT as PORT_APP, ServeurApp
+except ImportError:  # websockets pas installé
+    PORT_APP, ServeurApp = 8765, None
+
 DOSSIER = Path(__file__).resolve().parent
 FICHIER_APPS = DOSSIER / "apps.json"
 FICHIER_PAUSE = DOSSIER / "PAUSE"
 FICHIER_LOG = DOSSIER / "agent.log"
 FICHIER_REGLAGES = DOSSIER / "reglages.json"
+FICHIER_APPAREILS = DOSSIER / "appareils.json"   # téléphones appairés (jamais dans Git)
 REGLAGES_DEFAUT = {"ville": "", "latitude": None, "longitude": None}
 URL_METEO = ("https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
              "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max"
@@ -193,6 +202,92 @@ def volume():
         return round(_volume_endpoint().GetMasterVolumeLevelScalar() * 100)
     except Exception:
         return -1
+
+
+def regler_volume(pourcent):
+    v = max(0, min(100, int(pourcent)))
+    _volume_endpoint().SetMasterVolumeLevelScalar(v / 100, None)
+    return v
+
+
+# --- souris et clavier directement sur le PC (SendInput), pour l'app : plus fluide que l'USB ---
+class _MOUSEINPUT(ctypes.Structure):
+    _fields_ = [("dx", ctypes.c_long), ("dy", ctypes.c_long), ("mouseData", ctypes.c_ulong),
+                ("dwFlags", ctypes.c_ulong), ("time", ctypes.c_ulong),
+                ("dwExtraInfo", ctypes.c_size_t)]
+
+
+class _KEYBDINPUT(ctypes.Structure):
+    _fields_ = [("wVk", ctypes.c_ushort), ("wScan", ctypes.c_ushort), ("dwFlags", ctypes.c_ulong),
+                ("time", ctypes.c_ulong), ("dwExtraInfo", ctypes.c_size_t)]
+
+
+class _HARDWAREINPUT(ctypes.Structure):
+    _fields_ = [("uMsg", ctypes.c_ulong), ("wParamL", ctypes.c_ushort), ("wParamH", ctypes.c_ushort)]
+
+
+class _UNION(ctypes.Union):
+    _fields_ = [("mi", _MOUSEINPUT), ("ki", _KEYBDINPUT), ("hi", _HARDWAREINPUT)]
+
+
+class _INPUT(ctypes.Structure):
+    _fields_ = [("type", ctypes.c_ulong), ("u", _UNION)]
+
+
+def _envoyer_entrees(entrees):
+    tableau = (_INPUT * len(entrees))(*entrees)
+    ctypes.windll.user32.SendInput(len(entrees), tableau, ctypes.sizeof(_INPUT))
+
+
+def _souris(flags, dx=0, dy=0, data=0):
+    e = _INPUT(type=0)
+    e.u.mi = _MOUSEINPUT(dx, dy, data & 0xFFFFFFFF, flags, 0, 0)
+    return e
+
+
+def souris_pc(dx, dy):
+    _envoyer_entrees([_souris(0x0001, dx, dy)])
+
+
+def clic_pc(bouton):
+    bas, haut = (0x0008, 0x0010) if bouton == "droit" else (0x0002, 0x0004)
+    _envoyer_entrees([_souris(bas), _souris(haut)])
+
+
+def molette_pc(n):
+    _envoyer_entrees([_souris(0x0800, data=int(n) * 120)])
+
+
+def taper_pc(texte):
+    """Tape n'importe quel texte (accents, emoji…) quelle que soit la disposition du clavier."""
+    entrees = []
+    for ch in texte:
+        if ch == "\n":
+            for haut in (0, 0x0002):
+                e = _INPUT(type=1)
+                e.u.ki = _KEYBDINPUT(0x0D, 0, haut, 0, 0)
+                entrees.append(e)
+            continue
+        code = ord(ch)
+        unites = [code] if code < 0x10000 else [0xD800 + ((code - 0x10000) >> 10),
+                                                0xDC00 + ((code - 0x10000) & 0x3FF)]
+        for u in unites:
+            for haut in (0, 0x0002):
+                e = _INPUT(type=1)
+                e.u.ki = _KEYBDINPUT(0, u, 0x0004 | haut, 0, 0)
+                entrees.append(e)
+    if entrees:
+        _envoyer_entrees(entrees)
+
+
+def adresses_ip():
+    """Adresses IPv4 du PC (réseau local et Tailscale 100.x.y.z)."""
+    ips = []
+    for nom, adrs in psutil.net_if_addrs().items():
+        for a in adrs:
+            if getattr(a, "family", None) == 2 and not a.address.startswith(("127.", "169.254.")):
+                ips.append((nom, a.address))
+    return ips
 
 
 def texte_ascii(texte, defaut=""):
@@ -689,6 +784,15 @@ def executer_pc(ligne):
         except Exception as e:
             return f"Luminosité impossible : {e}"
         return f"Luminosité : {v} %"
+    if cmd == "VOL" and arg.isdigit():
+        if AudioUtilities is None:
+            return "pycaw n'est pas installé"
+        try:
+            if comtypes is not None:
+                comtypes.CoInitialize()
+            return f"Volume : {regler_volume(arg)} %"
+        except Exception as e:
+            return f"Volume impossible : {e}"
     if cmd == "VERROU":
         ctypes.windll.user32.LockWorkStation()
         return "PC verrouillé"
@@ -724,6 +828,10 @@ class Agent:
         self.dernier_temps = 0.0
         self.meteo = Meteo()
         self.meteo_envoyee = -1
+        self.donnees = {}        # dernières valeurs, pour l'app
+        self.ecran_esp = True
+        self.telephones = 0
+        self.lent = {"bat": (-1, 0), "cpu_temp": -1}
         self.lhm = LecteurLHM()
         self.fps = CompteurFPS()
 
@@ -740,64 +848,130 @@ class Agent:
             print("[agent] pas lancé en administrateur : les FPS ne seront pas disponibles")
         if not self.fps.demarrer():
             print(f"[agent] {self.fps.probleme}")
+        tour = 0
+        prochaine_connexion = 0.0
         while self.actif:
+            debut = time.time()
+            # --- liaison avec l'ESP32 (les mesures continuent même sans elle, pour l'app) ---
             if FICHIER_PAUSE.exists():
                 if self.liaison.ser is not None:
                     self.liaison.fermer()
                     print("[agent] pause : port COM libéré")
-                time.sleep(1)
-                continue
-            if self.liaison.ser is None:
-                if not self.liaison.connecter():
-                    time.sleep(3)
-                    continue
-                self.precedent = {}  # renvoie tous les états après reconnexion
-                self.dernier_temps = 0.0
-                self.meteo_envoyee = -1
-            if time.time() - self.dernier_temps > 60:
-                self.dernier_temps = time.time()
-                lt = time.localtime()
-                self.liaison.envoyer(f"TEMPS {lt.tm_year} {lt.tm_mon} {lt.tm_mday} {lt.tm_wday} "
-                                     f"{lt.tm_hour} {lt.tm_min} {lt.tm_sec}")
+            elif self.liaison.ser is None and debut >= prochaine_connexion:
+                if self.liaison.connecter():
+                    self.precedent = {}  # renvoie tous les états après reconnexion
+                    self.dernier_temps = 0.0
+                    self.meteo_envoyee = -1
+                else:
+                    prochaine_connexion = debut + 3
+
+            lent = tour % 4 == 0  # une fois par seconde
+            if lent:
+                self._mesures_lentes()
+
+            # --- mesures rapides : 4 fois par seconde ---
             cpu = round(psutil.cpu_percent(interval=None))
             ram = round(psutil.virtual_memory().percent)
-            bat, charge = batterie()
-            self.dernier_stat = f"STAT {cpu} {ram} {volume()} {bat} {charge}"
+            vol = volume()
+            bat, charge = self.lent["bat"]
+            self.dernier_stat = f"STAT {cpu} {ram} {vol} {bat} {charge}"
             self.liaison.envoyer(self.dernier_stat)
-
             t, u, mem = gpu()
             self.dernier_gpu = f"GPU {t} {u} {mem}"
             self.liaison.envoyer(self.dernier_gpu)
-
             en_jeu = self.precedent.get("JEU", "-") != "-"
             fps = self.fps.fps() if en_jeu else -1
-            self.dernier_perf = f"PERF {self.lhm.temperature_cpu()} {fps}"
+            self.dernier_perf = f"PERF {self.lent['cpu_temp']} {fps}"
             self.liaison.envoyer(self.dernier_perf)
-            if self.meteo.a_mettre_a_jour():
-                self.meteo.lancer()
-            if self.meteo.jours and self.meteo_envoyee != self.meteo.version:
-                self.meteo_envoyee = self.meteo.version
-                for ligne in self.meteo.lignes():
-                    self.liaison.envoyer(ligne)
-            for nom, outil in (("LibreHardwareMonitor", self.lhm), ("PresentMon", self.fps),
-                               ("Météo", self.meteo)):
-                if outil.probleme != self.problemes.get(nom):
-                    self.problemes[nom] = outil.probleme
-                    print(f"[agent] {nom} : {outil.probleme or 'OK'}")
 
-            nom, externe = sortie_audio()
-            etats = {
-                "CASQUE": nom_court_audio(nom) if externe else "-",
-                "MANETTE": "1" if manette_connectee() else "0",
-                "VERROU": "1" if pc_verrouille() else "0",
-                "JEU": texte_ascii(jeu_steam(), "Jeu") if jeu_steam() else "-",
+            p = self.precedent
+            self.donnees = {
+                "cpu": cpu, "ram": ram, "vol": vol, "bat": bat, "chg": charge,
+                "gpu_temp": t, "gpu_charge": u, "vram": mem,
+                "cpu_temp": self.lent["cpu_temp"], "fps": fps,
+                "casque": "" if p.get("CASQUE", "-") == "-" else p.get("CASQUE"),
+                "manette": p.get("MANETTE") == "1", "verrou": p.get("VERROU") == "1",
+                "jeu": "" if p.get("JEU", "-") == "-" else p.get("JEU"),
+                "meteo": [dict(zip(("icone", "tmax", "tmin", "pluie", "heure"), j))
+                          for j in self.meteo.jours],
+                "esp": self.liaison.ser is not None, "ecran_esp": self.ecran_esp,
             }
-            for cle, valeur in etats.items():
-                if self.precedent.get(cle) != valeur:
-                    self.precedent[cle] = valeur
-                    self.liaison.envoyer(f"EVT {cle} {valeur}")
-                    print(f"[agent] événement : {cle} = {valeur}")
-            time.sleep(1)
+            tour += 1
+            time.sleep(max(0.0, 0.25 - (time.time() - debut)))
+
+    def _mesures_lentes(self):
+        if time.time() - self.dernier_temps > 60:
+            self.dernier_temps = time.time()
+            lt = time.localtime()
+            self.liaison.envoyer(f"TEMPS {lt.tm_year} {lt.tm_mon} {lt.tm_mday} {lt.tm_wday} "
+                                 f"{lt.tm_hour} {lt.tm_min} {lt.tm_sec}")
+        self.lent["bat"] = batterie()
+        self.lent["cpu_temp"] = self.lhm.temperature_cpu()
+        if self.meteo.a_mettre_a_jour():
+            self.meteo.lancer()
+        if self.meteo.jours and self.meteo_envoyee != self.meteo.version:
+            self.meteo_envoyee = self.meteo.version
+            for ligne in self.meteo.lignes():
+                self.liaison.envoyer(ligne)
+        for nom, outil in (("LibreHardwareMonitor", self.lhm), ("PresentMon", self.fps),
+                           ("Météo", self.meteo)):
+            if outil.probleme != self.problemes.get(nom):
+                self.problemes[nom] = outil.probleme
+                print(f"[agent] {nom} : {outil.probleme or 'OK'}")
+        nom, externe = sortie_audio()
+        jeu = jeu_steam()
+        etats = {
+            "CASQUE": nom_court_audio(nom) if externe else "-",
+            "MANETTE": "1" if manette_connectee() else "0",
+            "VERROU": "1" if pc_verrouille() else "0",
+            "JEU": texte_ascii(jeu, "Jeu") if jeu else "-",
+        }
+        for cle, valeur in etats.items():
+            if self.precedent.get(cle) != valeur:
+                self.precedent[cle] = valeur
+                self.liaison.envoyer(f"EVT {cle} {valeur}")
+                print(f"[agent] événement : {cle} = {valeur}")
+
+    # --------------------------------------------------------------- pour l'app
+    def executer(self, ligne):
+        """Exécute une commande venant de la console ou de l'app. Renvoie un texte."""
+        ligne = ligne.strip()
+        if not ligne:
+            return ""
+        cmd = ligne.split(" ", 1)[0].upper()
+        reponse = executer_pc(ligne)
+        if reponse is not None:
+            if cmd not in ("APPS", "AUDIO"):
+                self.liaison.envoyer("EVT ACTION " + texte_ascii(ligne))
+            return reponse
+        if cmd == "ECRAN_ESP":
+            self.ecran_esp = ligne.split(" ", 1)[-1].strip() != "0"
+        if self.liaison.envoyer(ligne):
+            return "Envoyé à l'ESP32"
+        return "ESP32 non connectée"
+
+    def rappels_app(self):
+        def afficher_pin(pin):
+            print(f"[agent] code d'appairage : {pin}")
+            self.liaison.envoyer(f"EVT PIN {pin}")
+
+        def connexion(n):
+            if n != self.telephones:
+                self.liaison.envoyer(f"EVT APP {1 if n else 0}")
+            self.telephones = n
+
+        def texte(t):
+            taper_pc(t)
+            self.liaison.envoyer("EVT ACTION TEXTE")
+
+        return {
+            "executer": self.executer,
+            "etat": lambda: self.donnees,
+            "apps": lambda: list(charger_apps().keys()),
+            "afficher_pin": afficher_pin,
+            "souris": souris_pc, "clic": clic_pc, "molette": molette_pc,
+            "texte": texte, "connexion": connexion,
+        }
 
     def boucle_lecture(self):
         dernier_redemarrage = 0.0
@@ -834,6 +1008,8 @@ class Agent:
                 print(self.dernier_stat, self.dernier_gpu, self.dernier_perf, self.precedent)
                 print("Colonnes PresentMon :", self.fps.entete or "(pas encore reçues)")
                 print("Météo :", self.meteo.lignes() or self.meteo.probleme or "en cours…")
+                print("App : port", PORT_APP, "| téléphones connectés :", self.telephones,
+                      "| adresses :", ", ".join(f"{n} {ip}" for n, ip in adresses_ip()))
                 print("LibreHardwareMonitor :", self.lhm.probleme or "OK",
                       "| PresentMon :", self.fps.probleme or "OK",
                       "| administrateur :", "oui" if est_admin() else "non")
@@ -843,14 +1019,7 @@ class Agent:
                     comtypes.CoInitialize()
                 print(diagnostic_audio())
                 continue
-            reponse = executer_pc(ligne)
-            if reponse is not None:
-                print(reponse)
-                if ligne.split(" ", 1)[0].upper() not in ("APPS", "AUDIO"):
-                    # la mascotte réagit sur l'écran de l'ESP32
-                    self.liaison.envoyer("EVT ACTION " + texte_ascii(ligne))
-            elif not self.liaison.envoyer(ligne):
-                print("ESP32 non connectée")
+            print(self.executer(ligne))
         self.actif = False
 
 
@@ -871,6 +1040,12 @@ def main():
 
     agent = Agent(Liaison(args.port))
     threading.Thread(target=agent.boucle_mesures, daemon=True).start()
+    if ServeurApp is not None:
+        ServeurApp(FICHIER_APPAREILS, agent.rappels_app()).demarrer()
+        print("[agent] adresses du PC pour l'app : "
+              + ", ".join(f"{ip} ({n})" for n, ip in adresses_ip()))
+    else:
+        print("[agent] serveur app indisponible : py -m pip install --user websockets")
     threading.Thread(target=agent.boucle_lecture, daemon=True).start()
     if args.service:
         while True:

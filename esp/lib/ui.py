@@ -93,20 +93,33 @@ class Interface:
         self.reaction = 0        # début de la dernière réaction (saut + visage content)
         self.bulle = None        # icône dans la bulle près de la tête
         self.prochain_clin = time.ticks_add(time.ticks_ms(), 3000)
+        self.valeurs = {}        # valeurs affichées, qui glissent vers les vraies valeurs
 
     # ------------------------------------------------------------------ outils
     def _couleur(self, rgb):
         return rgb565(*rgb)
 
-    def reagir(self, icone, texte, bandeau=True):
+    def reagir(self, icone, texte, bandeau=True, duree=DUREE_BANDEAU):
         maintenant = time.ticks_ms()
         if bandeau:
-            self.bandeau = (icone, texte, maintenant)
+            self.bandeau = (icone, texte, maintenant, duree)
         self.reaction = maintenant
         self.bulle = icone
 
     def _age(self, debut, maintenant):
         return time.ticks_diff(maintenant, debut)
+
+    def _lisse(self, cle, valeur):
+        """Fait glisser la valeur affichée vers la vraie valeur (animation douce)."""
+        if valeur is None or valeur < 0:
+            self.valeurs.pop(cle, None)
+            return valeur
+        avant = self.valeurs.get(cle, valeur)
+        nouveau = avant + (valeur - avant) * 0.35
+        if abs(nouveau - valeur) < 0.5:
+            nouveau = valeur
+        self.valeurs[cle] = nouveau
+        return int(nouveau + 0.5)
 
     def luminosite_voulue(self, maintenant):
         age = self._age(self.mode_depuis, maintenant)
@@ -218,10 +231,10 @@ class Interface:
         fb.fill_rect(18, 76, 158, 3, rgb565(45, 40, 80))
         fb.fill_rect(18, 76, 158 * secondes // 59, 3, rgb565(*CYAN))
         st = etat["stat"]
-        self._anneau_valeur(42, 108, st["cpu"], VERT, "CPU", carte)
-        self._anneau_valeur(98, 108, st["ram"], CYAN, "RAM", carte)
+        self._anneau_valeur(42, 108, self._lisse("cpu", st["cpu"]), VERT, "CPU", carte)
+        self._anneau_valeur(98, 108, self._lisse("ram", st["ram"]), CYAN, "RAM", carte)
         # volume
-        vol = st["vol"]
+        vol = self._lisse("vol", st["vol"])
         if vol >= 0:
             self.f_xs.ecrire(fb, "VOL", 140, 128, GRIS, carte)
             for i in range(5):
@@ -255,15 +268,15 @@ class Interface:
         fb = self.fb
         nom = self.f_s.couper(etat["evt"]["jeu"], 176)
         self.f_s.ecrire(fb, nom, 14, 10, CYAN, carte)
-        fps = etat["perf"]["fps"]
+        fps = self._lisse("fps", etat["perf"]["fps"])
         if fps >= 0:
             couleur = VERT if fps >= 60 else (ORANGE if fps >= 30 else ROUGE)
             x = self.f_fps.ecrire(fb, "%d" % fps, 12, 24, couleur, carte)
         else:
             x = self.f_fps.ecrire(fb, "--", 12, 24, (70, 60, 110), carte)
         self.f_m.ecrire(fb, "FPS", x + 6, 64, MAGENTA, carte)
-        self._barre_temp(100, "CPU", etat["perf"]["cpu_temp"], carte)
-        self._barre_temp(124, "GPU", etat["gpu"]["temp"], carte)
+        self._barre_temp(100, "CPU", self._lisse("tcpu", etat["perf"]["cpu_temp"]), carte)
+        self._barre_temp(124, "GPU", self._lisse("tgpu", etat["gpu"]["temp"]), carte)
         morceaux = []
         if etat["gpu"]["charge"] >= 0:
             morceaux.append("GPU %d %%" % etat["gpu"]["charge"])
@@ -338,16 +351,16 @@ class Interface:
     def _bandeau(self, maintenant):
         if self.bandeau is None:
             return
-        icone, texte, debut = self.bandeau
+        icone, texte, debut, duree = self.bandeau
         age = self._age(debut, maintenant)
-        if age > DUREE_BANDEAU:
+        if age > duree:
             self.bandeau = None
             return
         largeur = min(240, self.f_m.largeur(texte) + 46)
         if age < 250:
             x = -largeur + int((largeur + 8) * age / 250)
-        elif age > DUREE_BANDEAU - 250:
-            x = 8 - int((largeur + 8) * (age - (DUREE_BANDEAU - 250)) / 250)
+        elif age > duree - 250:
+            x = 8 - int((largeur + 8) * (age - (duree - 250)) / 250)
         else:
             x = 8
         fb = self.fb

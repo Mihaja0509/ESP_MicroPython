@@ -4,10 +4,32 @@ Projet séparé de `..\firmware` et `..\app` (projet clim, en pause).
 
 - Carte : Waveshare **ESP32-S3-LCD-1.47** seule (ESP32-S3R8, 8 Mo PSRAM octal, 16 Mo flash, USB natif, écran ST7789 172×320), **sans module externe**.
 - `esp/` : code MicroPython copié sur la carte (`main.py` à la racine, `lib/` dans le dossier `lib` de la carte).
-- `app/` : app Dart/Flutter Android (`com.mmdigitek.esp_micro`).
+- `app/` : app Dart/Flutter Android (`com.mmdigitek.esp_micro`, nom affiché « Télécommande PC »).
 - `docs/` : documents de phase et état du code (à appliquer exactement).
 - `bin/` : firmware MicroPython téléchargé (ignoré par Git).
 - Dépôt : https://github.com/Mihaja0509/ESP_MicroPython.git
+
+## Architecture (Phase 5)
+
+```
+App Android ⇄ WebSocket (port 8765) ⇄ agent PC (agent_pc.py + serveur_app.py) ⇄ USB série (COM4) ⇄ ESP32
+```
+
+- L'ESP32 n'a pas de Wi-Fi utilisable (box en 5 GHz) : tout passe par l'agent PC.
+- Accès de partout : **Tailscale** sur le PC et le téléphone (même compte) ; dans l'app, adresse du PC en `100.x.y.z`. Pare-feu : `tools\agent\autoriser_app.ps1` (administrateur, lancé par Mihaja) ouvre 8765 au réseau local et à Tailscale seulement.
+- **Appairage** : l'app demande un code → l'agent envoie `EVT PIN 123456` (bandeau 60 s sur l'ESP32) ; code valable 2 min, 5 essais. Téléphones appairés dans `tools\agent\appareils.json` (jamais lu, jamais commité). `EVT APP 1|0` = téléphone connecté / déconnecté.
+- Souris, clics, défilement et texte de l'app : exécutés directement sur le PC (SendInput). Raccourcis (`KEY`) et touches multimédia : via l'ESP32. `VOL n` = volume exact. État envoyé à l'app 4 fois par seconde.
+- Dépendance PC en plus : `websockets` (`py -m pip install --user -U websockets`).
+
+## Fichiers de l'app (`app/`)
+
+- `lib/main.dart` (navigation), `lib/etat.dart` (état reçu du PC), `lib/connexion.dart` (WebSocket + appairage), `lib/theme.dart` (couleurs, fonds crépuscule / néon / nuit).
+- `lib/ecrans/` : `accueil.dart`, `souris.dart` (pavé tactile + clavier), `controles.dart` (volume, luminosité, apps, alimentation), `reglages.dart` (adresse, appairage, aide Tailscale).
+- `lib/widgets/` : `mascotte.dart`, `anneau.dart`.
+- `assets/images/perso_*.png` (8, exportées par `tools\assets\generer_assets.py`), `assets/fonts/Inter-*.otf` (4) + licence.
+- `test/widget_test.dart` (2 tests). Dépendances : `web_socket_channel`, `shared_preferences`.
+- Manifeste : permission `INTERNET`, `usesCleartextTraffic="true"` (WebSocket `ws://` en clair, protégé par Tailscale + appairage).
+- APK release (signée avec la clé debug) : `app\build\app\outputs\flutter-apk\app-release.apk`.
 
 ## Brochage de la carte (Waveshare)
 
@@ -52,8 +74,10 @@ Agent PC (`tools\agent\agent_pc.py`) : il occupe le port COM4 tant qu'il tourne.
 - `METEO` : relire la météo gardée (`OK orage 32/24 pluie 80% vers 15h | …`).
 
 Dans `app/` :
+- `flutter pub get`
 - `flutter analyze`
-- `flutter build apk --debug`
+- `flutter test`
+- `flutter build apk --release` (ou `--debug`) ; `flutter install` avec le téléphone branché (débogage USB)
 
 ## Règles
 

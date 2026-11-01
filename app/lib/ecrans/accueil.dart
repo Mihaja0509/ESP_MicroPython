@@ -1,0 +1,286 @@
+// Écran d'accueil : la mascotte, l'état du PC (comme l'écran de l'ESP32) et les actions rapides.
+import 'package:flutter/material.dart';
+
+import '../connexion.dart';
+import '../etat.dart';
+import '../theme.dart';
+import '../widgets/anneau.dart';
+import '../widgets/mascotte.dart';
+
+class EcranAccueil extends StatelessWidget {
+  final Connexion cx;
+
+  const EcranAccueil({super.key, required this.cx});
+
+  @override
+  Widget build(BuildContext context) {
+    final e = cx.etat;
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      children: [
+        _entete(e),
+        const SizedBox(height: 16),
+        if (!cx.connecte) _horsLigne(context) else ...[
+          if (e.enJeu) ...[_carteJeu(e), const SizedBox(height: 14)],
+          _carteStats(e),
+          const SizedBox(height: 14),
+          if (e.meteo.isNotEmpty) ...[_carteMeteo(e), const SizedBox(height: 14)],
+          _actions(context, e),
+        ],
+      ],
+    );
+  }
+
+  Widget _entete(EtatPC e) {
+    final (texte, couleur) = !cx.connecte
+        ? ('Hors ligne', Couleurs.gris)
+        : e.verrou
+            ? ('PC verrouillé', Couleurs.doux)
+            : e.enJeu
+                ? ('Mode jeu', Couleurs.magenta)
+                : ('Connecté', Couleurs.vert);
+    final heure = TimeOfDay.now();
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Mascotte(etat: e, derniereAction: cx.derniereAction, hauteur: 175),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '${heure.hour.toString().padLeft(2, '0')}:${heure.minute.toString().padLeft(2, '0')}',
+                style: const TextStyle(fontSize: 44, fontWeight: FontWeight.w900, color: Colors.white, height: 1),
+              ),
+              const SizedBox(height: 6),
+              const Text('Bonjour Mihaja !',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Couleurs.doux)),
+              const SizedBox(height: 10),
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 400),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: couleur.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: couleur.withValues(alpha: 0.6)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.circle, size: 9, color: couleur),
+                    const SizedBox(width: 6),
+                    Text(texte, style: TextStyle(color: couleur, fontWeight: FontWeight.w700)),
+                  ],
+                ),
+              ),
+              if (cx.connecte && !e.esp)
+                const Padding(
+                  padding: EdgeInsets.only(top: 8),
+                  child: Text('ESP32 non branchée',
+                      style: TextStyle(fontSize: 12, color: Couleurs.orange)),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _horsLigne(BuildContext context) {
+    final texte = switch (cx.statut) {
+      Statut.sansAdresse => "Indique l'adresse de ton PC dans l'onglet Réglages.",
+      Statut.appairage => "Ce téléphone n'est pas encore appairé : va dans Réglages.",
+      Statut.connexion => 'Connexion au PC…',
+      _ => 'PC injoignable. Il est peut-être éteint, ou Tailscale est coupé. Nouvel essai toutes les 3 s.',
+    };
+    return Carte(
+      child: Row(
+        children: [
+          const Icon(Icons.wifi_off_rounded, color: Couleurs.gris),
+          const SizedBox(width: 12),
+          Expanded(child: Text(texte, style: const TextStyle(color: Couleurs.doux))),
+        ],
+      ),
+    );
+  }
+
+  Widget _carteJeu(EtatPC e) {
+    final couleurFps = e.fps >= 60
+        ? Couleurs.vert
+        : e.fps >= 30
+            ? Couleurs.orange
+            : Couleurs.rouge;
+    return Carte(
+      jeu: true,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.sports_esports_rounded, color: Couleurs.cyan, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(e.jeu,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Couleurs.cyan, fontWeight: FontWeight.w700, fontSize: 15)),
+              ),
+              if (e.manette) const Icon(Icons.gamepad_rounded, color: Couleurs.magenta, size: 20),
+            ],
+          ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              TweenAnimationBuilder<double>(
+                tween: Tween<double>(end: e.fps < 0 ? 0.0 : e.fps.toDouble()),
+                duration: const Duration(milliseconds: 400),
+                builder: (context, v, _) => Text(
+                  e.fps < 0 ? '--' : v.round().toString(),
+                  style: TextStyle(fontSize: 72, fontWeight: FontWeight.w900, color: couleurFps, height: 1.05),
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Text('FPS',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: Couleurs.magenta)),
+            ],
+          ),
+          const SizedBox(height: 6),
+          BarreTemperature(nom: 'CPU', valeur: e.cpuTemp),
+          BarreTemperature(nom: 'GPU', valeur: e.gpuTemp),
+        ],
+      ),
+    );
+  }
+
+  Widget _carteStats(EtatPC e) {
+    return Carte(
+      jeu: e.enJeu,
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              Anneau(valeur: e.cpu, nom: 'CPU', couleur: Couleurs.vert),
+              Anneau(valeur: e.ram, nom: 'RAM', couleur: Couleurs.cyan),
+              Anneau(valeur: e.gpuCharge, nom: 'GPU', couleur: Couleurs.magenta),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 10,
+            runSpacing: 8,
+            alignment: WrapAlignment.center,
+            children: [
+              if (e.bat >= 0)
+                _pastille(e.enCharge ? Icons.bolt_rounded : Icons.battery_std_rounded, '${e.bat} %',
+                    e.bat < 20 && !e.enCharge ? Couleurs.rouge : Couleurs.orange),
+              if (e.vol >= 0) _pastille(Icons.volume_up_rounded, '${e.vol} %', Couleurs.cyan),
+              if (e.cpuTemp >= 0) _pastille(Icons.thermostat_rounded, 'CPU ${e.cpuTemp}°', Couleurs.vert),
+              if (e.gpuTemp >= 0) _pastille(Icons.memory_rounded, 'GPU ${e.gpuTemp}°', Couleurs.magenta),
+              if (e.casque.isNotEmpty) _pastille(Icons.headphones_rounded, e.casque, Couleurs.cyan),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _pastille(IconData icone, String texte, Color couleur) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: couleur.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icone, size: 16, color: couleur),
+          const SizedBox(width: 5),
+          Text(texte, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.white)),
+        ],
+      ),
+    );
+  }
+
+  IconData _iconeMeteo(String nom) => switch (nom) {
+        'soleil' => Icons.wb_sunny_rounded,
+        'eclaircie' => Icons.wb_cloudy_outlined,
+        'pluie' => Icons.water_drop_rounded,
+        'orage' => Icons.thunderstorm_rounded,
+        'brouillard' => Icons.foggy,
+        'neige' => Icons.ac_unit_rounded,
+        _ => Icons.cloud_rounded,
+      };
+
+  Widget _carteMeteo(EtatPC e) {
+    return Carte(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Titre('Météo', icone: Icons.cloud_queue_rounded),
+          for (var i = 0; i < e.meteo.length && i < 2; i++)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Row(
+                children: [
+                  Icon(_iconeMeteo(e.meteo[i].icone), size: 34, color: Couleurs.orange),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(i == 0 ? "Aujourd'hui" : 'Demain',
+                            style: const TextStyle(color: Couleurs.gris, fontSize: 12)),
+                        Text('${e.meteo[i].tmax}° / ${e.meteo[i].tmin}°',
+                            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+                        Text(e.meteo[i].textePluie,
+                            style: TextStyle(
+                                fontSize: 13,
+                                color: e.meteo[i].pluie >= 20 ? Couleurs.cyan : Couleurs.vert)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _actions(BuildContext context, EtatPC e) {
+    return Carte(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Titre('Actions rapides', icone: Icons.flash_on_rounded),
+          GridView.count(
+            crossAxisCount: 4,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            mainAxisSpacing: 10,
+            crossAxisSpacing: 10,
+            childAspectRatio: 0.85,
+            children: [
+              BoutonAction(icone: Icons.lock_rounded, texte: 'Verrouiller', onTap: () => cx.cmd('VERROU')),
+              BoutonAction(
+                  icone: Icons.desktop_access_disabled_rounded,
+                  texte: 'Écran PC',
+                  onTap: () => cx.cmd('ECRAN_OFF')),
+              BoutonAction(
+                icone: e.ecranEsp ? Icons.lightbulb_rounded : Icons.lightbulb_outline_rounded,
+                texte: 'Écran ESP32',
+                couleur: e.ecranEsp ? Couleurs.orange : Couleurs.gris,
+                onTap: () => cx.cmd(e.ecranEsp ? 'ECRAN_ESP 0' : 'ECRAN_ESP 1'),
+              ),
+              BoutonAction(
+                  icone: Icons.space_dashboard_rounded, texte: 'Bureau', onTap: () => cx.cmd('KEY win+d')),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
