@@ -1,0 +1,8 @@
+# Firmware MicroPython téléchargé
+bin/
+
+# Secrets de la carte
+esp/secrets.py
+
+# Python
+__pycache__/

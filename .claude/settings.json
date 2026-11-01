@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Read(**/secrets.py)",
+      "Read(**/key.properties)",
+      "Read(**/local.properties)",
+      "Read(**/*.jks)",
+      "Read(**/*.keystore)",
+      "Read(**/*.pem)",
+      "Read(**/build/**)",
+      "Read(**/.dart_tool/**)",
+      "Read(**/.gradle/**)",
+      "Read(**/bin/**)"
+    ]
+  }
+}
