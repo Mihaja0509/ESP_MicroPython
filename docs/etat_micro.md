@@ -12,35 +12,61 @@ Projet à part (sans lien avec la clim ni le master) : la Waveshare ESP32-S3-LCD
 ## Ce que veut Mihaja
 - Raccourcis : clavier, souris (pavé tactile dans l'app), volume, luminosité, ouvrir une app, interagir dans les apps.
 - Éteindre / allumer le PC, et éteindre / allumer l'écran de l'ESP32.
-- Mascotte chibi qui lui ressemble (il enverra sa photo), animée : c'est elle qui « fait » les actions à l'écran.
-- Pas besoin : diapos, Pomodoro (peu important).
-- Le bouton BOOT n'est pas accessible quand la carte est branchée → tout se commande depuis l'app / le PC, aucune action ne dépend du bouton.
+- Mascotte chibi qui lui ressemble, animée : c'est elle qui « fait » les actions à l'écran. Catalogue : mascotte_expressions.md.
+- Écran vivant et joli (animations partout), rien ne doit dépasser de l'écran.
+- **Mode gamer** : quand un jeu tourne, l'écran et la mascotte passent en thème gamer, avec FPS, température CPU et GPU bien visibles.
+- Plus tard dans l'app : raccourcis pour la préparation de certains jeux (commandes en terminal admin, redémarrage de Steam, Ctrl+6 avant Play). À examiner quand on y arrivera (demander quelles commandes exactement).
+- Pas besoin : diapos, Pomodoro.
+- Le bouton BOOT n'est pas accessible quand la carte est branchée → tout se commande depuis l'app / le PC.
+
+## PC de Mihaja
+- Portable Windows, CPU Intel, GPU NVIDIA RTX 5070.
+- Jeux lancés depuis Steam (bibliothèque de 18 jeux : God of War Ragnarök, Black Myth: Wukong, RDR2, Spider-Man 2, Ghost of Tsushima…).
+- Casque : surtout par dongle USB 2,4 GHz, parfois Bluetooth. Manette par dongle (reconnue par XInput).
+- D'accord pour installer LibreHardwareMonitor + PresentMon et lancer l'agent en administrateur.
+
+## Mascotte et design de l'écran
+- Source : illustration chibi de Mihaja. Tête détourée (contour blanc « sticker ») + buste redessiné : hoodie bleu nuit, casque cyan autour du cou (arceau derrière le cou), bas arrondi.
+- Tenue A retenue, fond crépuscule (violet → rose/orange, halo, ville, particules).
+- Sprite 95 × 150 px ; images faites : yeux ouverts, yeux fermés. Scripts mascotte.py / maquette.py dans la session Claude web (à reproduire dans tools/).
+- Maquette animée validée dans l'esprit : carte « verre » (horloge, date, barre des secondes, jauges CPU/RAM, volume, pastilles), mascotte qui respire et cligne ; bandeau + bulle + saut à chaque commande ; assombri + z z z quand verrouillé.
+- À concevoir : thème gamer (fond sombre néon, gros FPS, températures CPU/GPU, mascotte casque sur les oreilles + manette).
 
 ## Contraintes connues
-- PC = portable Windows → pas d'allumage complet à distance (pas d'Ethernet / Wake-on-LAN fiable). On vise : éteindre l'écran + verrouiller (réveil instantané), veille, arrêt. Le réveil depuis la veille par l'ESP32 n'est pas garanti (réveil USB à distance probablement non géré par MicroPython ; à tester).
-- `TEXT` en QWERTY US : disposition du clavier de Mihaja à confirmer.
-- Le port série (COM4) ne peut être ouvert que par un seul programme à la fois (mpremote OU pc_test / futur programme PC).
+- Pas d'allumage complet à distance (portable). Éteindre l'écran + verrouiller, veille, arrêt : OK.
+- `TEXT` en QWERTY US, compatible avec le clavier de Mihaja.
+- Le port série (COM4) ne peut être ouvert que par un seul programme à la fois (agent OU mpremote OU pc_test). L'agent se quitte avec `q`.
+- Après chaque modification de esp/main.py, il faut le recopier sur la carte (sinon « ERR commande inconnue »).
 
 ## Environnement
-- MicroPython v1.29.0 (2026-08-24), ESP32_GENERIC_S3-SPIRAM_OCT ; ~8,3 Mo de RAM libre (PSRAM utilisée).
-- Port : COM4 sous MicroPython (USB 303a:4001) ; COM3 sous le bootloader / programme C++. `py -m mpremote devs` pour retrouver.
-- esptool 5.6.0, mpremote 1.29.0 ; Flutter 3.47.2 / Dart 3.13.2 ; app package esp_micro (com.mmdigitek.esp_micro).
+- MicroPython v1.29.0, ESP32_GENERIC_S3-SPIRAM_OCT ; ~8,3 Mo de RAM libre.
+- Port COM4 (303a:4001). esptool 5.6.0, mpremote 1.29.0 ; Flutter 3.47.2 / Dart 3.13.2.
+- Sur la carte : boot.py, main.py, lib/lcd.py, lib/hid_pc.py, lib/usb/device/*.mpy (usb-device-hid 0.2.0).
+- PC : psutil, pycaw, comtypes, screen-brightness-control, pyserial (+ nvidia-ml-py à la 2-bis).
 
 ## Choix techniques
-- Écran : pilote maison esp/lib/lcd.py (ST7789, SPI 40 MHz, framebuf RGB565 de 110 Ko, décalage 34, paysage MADCTL 0x60, inversion activée, BGR = False). Affichage validé par Mihaja (couleurs et cadrage bons).
-- Brochage : SCLK 40, MOSI 45, CS 42, DC 41, RST 39, BL 48 (PWM), LED WS2812 38, BOOT 0.
-- USB : HID composite (clavier rapport 1, souris rapport 2, multimédia rapport 3) via micropython-lib usb-device-hid, avec builtin_driver=True (le port série reste actif).
-- Graphismes prévus : sprites dessinés à part, convertis sur le PC en RGB565 brut, stockés dans la flash et affichés avec framebuf.blit (rapide) ; polices bitmap plus belles converties depuis des TTF.
+- Écran : esp/lib/lcd.py (ST7789, SPI 40 MHz, framebuf RGB565, décalage 34, paysage).
+- USB HID composite (clavier 1, souris 2, multimédia 3), port série conservé.
+- Protocole série (une ligne, réponse OK / ERR / PONG) :
+  - PC → ESP32 (HID) : PING, KEY, TEXT, VOL+/VOL-/MUTE/PLAY/NEXT/PREV/LUM+/LUM-, MOUSE, CLIC, CLICD, MOLETTE.
+  - Agent → ESP32 (données) : `STAT cpu ram vol bat charge` (1/s), `GPU temp charge vram` (1/s, 2-bis), `EVT CASQUE nom|-`, `EVT MANETTE 0|1`, `EVT VERROU 0|1`, `EVT JEU nom|-` (2-bis).
+  - Commandes exécutées par l'agent : APPS, APP nom, LUM n / LUM+ / LUM-, VERROU, ECRAN_OFF, VEILLE, ARRET (60 s), ANNULER, AUDIO (diagnostic).
+- Casque (2-bis) : sortie audio par défaut branchée en USB/Bluetooth (d'après les propriétés Windows) = casque.
+- Jeu en cours : registre HKCU\Software\Valve\Steam\RunningAppID (+ Apps\<id>\Name).
+- GPU : NVML (nvidia-ml-py), sans admin. À venir : température CPU via LibreHardwareMonitor, FPS via PresentMon (admin).
 
 ## Feuille de route
-1. Test clavier / souris / multimédia USB (docs/micro_phase1_clavier.md) — décide si le mode clavier est fiable.
-2. Programme PC (Python, démarre avec Windows) relié à l'ESP32 par le port série : ouvrir des apps, luminosité, veille / arrêt, éteindre l'écran, stats du PC renvoyées à l'écran de l'ESP32.
-3. Wi-Fi + MQTT (accès depuis n'importe où) + app Flutter v1 : pavé tactile, clavier, volume, luminosité, lanceur d'apps, alimentation, écran ESP on/off.
-4. Mascotte chibi animée (d'après la photo de Mihaja) qui joue les actions + tableau de bord (heure, stats PC).
-5. Raccourcis par app (Spotify, YouTube, VS Code…), raccourcis personnalisables depuis l'app.
+1. ✅ Clavier / souris / multimédia USB.
+2. ✅ (sauf casque) Programme PC : apps, luminosité, verrou, écran éteint, stats ; 2-bis : casque, jeu Steam, GPU.
+3. Données gamer 2 : température CPU (LibreHardwareMonitor), FPS (PresentMon), démarrage auto de l'agent en admin.
+4. Écran vivant : tableau de bord animé + mascotte + thème gamer automatique.
+5. Wi-Fi + MQTT (accès de partout) + app Flutter : pavé tactile, clavier, volume, luminosité, apps, alimentation, écran ESP on/off.
+6. Raccourcis par app et raccourcis de jeux.
 
 ## Phases
 | Phase | Sujet | Commit | État |
 |---|---|---|---|
-| 0 | MicroPython + pilote écran + démo + squelette Flutter (docs/micro_phase0.md) | poussé | terminée, écran validé |
-| 1 | Clavier / souris / multimédia USB (docs/micro_phase1_clavier.md) | — | à appliquer |
+| 0 | MicroPython + pilote écran + démo + squelette Flutter | poussé | terminée |
+| 1 | Clavier / souris / multimédia USB | poussé | terminée (LUM+/-, CLIC, PLAY… non testés) |
+| 2 | Programme PC (agent) | poussé | testée : apps, luminosité, manette, verrou, écran éteint, VOL+/KEY via agent OK ; casque KO (nom « Speakers… » probable) |
+| 2-bis | Casque par type de branchement + jeu Steam + GPU NVIDIA (docs/micro_phase2_bis.md) | — | à appliquer |

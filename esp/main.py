@@ -12,6 +12,10 @@ pc = PC()
 etat_usb = "connexion..."
 derniere = "-"
 nb = 0
+# Valeurs envoyées par le programme PC (agent_pc.py)
+stat = {"cpu": -1, "ram": -1, "vol": -1, "bat": -1, "chg": 0}
+evt = {"casque": "", "manette": 0, "verrou": 0, "jeu": ""}
+gpu = {"temp": -1, "charge": -1, "vram": -1}
 
 
 def dessiner():
@@ -20,10 +24,19 @@ def dessiner():
     ecran.texte("Telecommande PC", 10, 8, lcd.CYAN, 2)
     couleur_usb = lcd.VERT if etat_usb == "pret" else lcd.ORANGE
     ecran.texte("USB : " + etat_usb, 10, 40, couleur_usb, 2)
-    ecran.texte("Derniere commande :", 10, 76, lcd.GRIS, 1)
+    if evt["jeu"]:
+        ecran.texte("JEU : " + evt["jeu"][:34], 10, 64, lcd.VERT, 1)
+    ecran.texte("GPU %d C  %d%%  VRAM %d%%" % (gpu["temp"], gpu["charge"], gpu["vram"]),
+                10, 78, lcd.GRIS, 1)
     ecran.texte(derniere[:19], 10, 92, lcd.BLANC, 2)
-    ecran.texte("Commandes : %d" % nb, 10, 130, lcd.ORANGE, 1)
-    ecran.texte("tools/pc_test.py sur le PC", 10, 150, lcd.GRIS, 1)
+    ecran.texte("CPU %d%%  RAM %d%%  Vol %d%%" % (stat["cpu"], stat["ram"], stat["vol"]),
+                10, 118, lcd.ORANGE, 1)
+    ecran.texte("Batterie %d%%%s" % (stat["bat"], " (en charge)" if stat["chg"] else ""),
+                10, 132, lcd.ORANGE, 1)
+    ecran.texte("Casque : " + (evt["casque"][:30] or "non"), 10, 146, lcd.CYAN, 1)
+    ecran.texte("Manette : %s   Verrou : %s" % ("oui" if evt["manette"] else "non",
+                                                "oui" if evt["verrou"] else "non"),
+                10, 160, lcd.CYAN, 1)
     ecran.afficher()
 
 
@@ -57,6 +70,34 @@ def executer(ligne):
     arg = mots[1] if len(mots) > 1 else ""
     if cmd == "PING":
         return "PONG"
+    if cmd == "STAT":
+        try:
+            v = [int(x) for x in arg.split()]
+            stat["cpu"], stat["ram"], stat["vol"], stat["bat"], stat["chg"] = v[:5]
+        except ValueError:
+            return "ERR utilise : STAT cpu ram vol bat charge"
+        return "OK"
+    if cmd == "GPU":
+        try:
+            gpu["temp"], gpu["charge"], gpu["vram"] = [int(x) for x in arg.split()][:3]
+        except ValueError:
+            return "ERR utilise : GPU temp charge vram"
+        return "OK"
+    if cmd == "EVT":
+        morceaux = arg.split(" ", 1)
+        typ = morceaux[0].upper()
+        val = morceaux[1].strip() if len(morceaux) > 1 else ""
+        if typ == "CASQUE":
+            evt["casque"] = "" if val in ("", "-") else val
+        elif typ == "MANETTE":
+            evt["manette"] = 1 if val == "1" else 0
+        elif typ == "VERROU":
+            evt["verrou"] = 1 if val == "1" else 0
+        elif typ == "JEU":
+            evt["jeu"] = "" if val in ("", "-") else val
+        else:
+            return "ERR evenement inconnu : " + typ
+        return "OK"
     if etat_usb != "pret" and not pc.is_open():
         return "ERR USB pas reconnu par le PC"
     if cmd == "KEY":
@@ -94,8 +135,9 @@ while True:
     if ligne:
         reponse = executer(ligne.strip())
         print(reponse)
-        nb += 1
-        derniere = ligne.strip()
+        if not ligne.startswith(("STAT", "EVT", "GPU")):
+            nb += 1
+            derniere = ligne.strip()
         if pc.is_open():
             etat_usb = "pret"
         dessiner()

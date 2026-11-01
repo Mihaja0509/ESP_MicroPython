@@ -28,6 +28,8 @@ Carte (le port change après un flash ou un reset USB : le retrouver avec `devs`
 - `py -m mpremote connect <port> reset` : redémarrer
 - `py -m mpremote connect <port> repl` : console interactive (Ctrl-] pour quitter)
 
+Agent PC (`py -X utf8 tools\agent\agent_pc.py`) : il occupe le port COM4 tant qu'il tourne. Le quitter (`q`) avant d'utiliser mpremote ou `tools\pc_test.py`.
+
 Dans `app/` :
 - `flutter analyze`
 - `flutter build apk --debug`
