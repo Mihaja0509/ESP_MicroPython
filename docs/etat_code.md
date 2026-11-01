@@ -1,6 +1,6 @@
 # État du code — Micro
 
-Mis à jour : 2026-11-01 (fin de Phase 3 : température CPU, FPS et démarrage automatique)
+Mis à jour : 2026-11-01 (fin de Phase 3-bis : ESP32 protégée, FPS justes)
 
 ## Arborescence
 
@@ -127,7 +127,7 @@ Dépendances PC de l'agent (`pip install --user`) :
 ls :/
          139 boot.py
            0 lib/
-        4981 main.py
+        5562 main.py
 ls :/lib
         6040 hid_pc.py
         4071 lcd.py
@@ -138,7 +138,9 @@ ls :/lib/usb/device
         1569 hid.mpy
 ```
 
-Vérification (Phase 3, étape 7) : `py -m mpremote connect COM4 fs cat :main.py` contient bien `    if cmd == "PERF":`.
+`erreur.txt` sera créé sur la carte à la première erreur attrapée par `noter_erreur()`.
+
+Vérification (Phase 3-bis, étape 4) : `py -m mpremote connect COM4 fs cat :main.py` contient bien `def noter_erreur(e):`.
 
 ## Installation de usb-device-hid (Phase 1, étape 4)
 
@@ -293,6 +295,96 @@ serial.serialutil.SerialException: ClearCommError failed (PermissionError(13, 'T
   -> OK
 ```
 
+## Mise en place (Phase 3-bis, étapes 1, 4 et 7)
+
+- `tools\agent\PAUSE` créé ; l'agent en fond (tâche « ESP32 Telecommande Agent », code Phase 3) a libéré COM4.
+- Copie de main.py : ClearCommError au 1er essai, réussie au 2e (après 3 s). `fs cat` : idem (ClearCommError puis OK). Puis `reset`.
+- Seule la dernière ligne des traces ClearCommError a été capturée ; c'est la même erreur que la trace complète de la section « Trace mpremote (Phase 2-bis, étape 4) » :
+
+```
+serial.serialutil.SerialException: ClearCommError failed (PermissionError(13, 'The device does not recognize the command.', None, 22))
+```
+
+- Pour l'étape 6, Mihaja a arrêté la tâche planifiée (`Stop-ScheduledTask`, état ensuite « Ready ») : avec PAUSE, l'agent console ne se connecte pas ; sans PAUSE, l'agent en fond reprend COM4.
+- `PAUSE` supprimé juste avant de lancer l'agent console (étape 7 avancée), tâche planifiée toujours arrêtée.
+- Après l'arrêt de la tâche, un processus `PresentMon-2.6.0-x64.exe` lancé par l'ancien agent tournait encore (non arrêté).
+
+## Réponses de la carte (Phase 3-bis, étape 5)
+
+```
+> py -X utf8 tools\pc_test.py COM4 --cmd PING
+  -> PONG
+> py -X utf8 tools\pc_test.py COM4 --cmd "PERF 70 144"
+  -> OK
+```
+
+## Relance automatique (Phase 3-bis, étape 6)
+
+1. `py -m mpremote connect COM4 exec "raise SystemExit"` : ClearCommError au 1er essai, réussi au 2e (code 0) → la carte reste dans l'invite `>>>`.
+2. Agent console (`py -X utf8 tools\agent\agent_pc.py`, non administrateur) lancé 15 s, puis `q` sur son entrée (code de sortie 0). Sortie complète :
+
+```
+Commandes PC :
+  APPS                  liste des apps   |  APP spotify    ouvre une app
+  LUM 70  LUM+  LUM-    luminosité de l'écran du PC
+  VERROU                verrouille        |  ECRAN_OFF      verrouille + éteint l'écran
+  VEILLE                mise en veille    |  ARRET          arrêt dans 60 s  |  ANNULER
+  ETAT                  affiche ce que l'agent envoie à l'ESP32
+  AUDIO                 liste les sorties audio (diagnostic du casque)
+Toute autre commande (KEY win+d, TEXT …, VOL+, MOUSE 100 0, CLIC…) part à l'ESP32.
+  q                     quitter
+> [agent] pas lancé en administrateur : les FPS ne seront pas disponibles
+[agent] ESP32 connectée sur COM4
+[agent] LibreHardwareMonitor : OK
+[agent] PresentMon : PresentMon s'est arrêté (droits administrateur ?)
+[agent] événement : CASQUE = Headphones (Xiaomi蓝牙音箱Pro)
+[agent] événement : MANETTE = 0
+[agent] événement : VERROU = 0
+[agent] événement : JEU = -
+[esp32] STAT 56 48 38 76 1
+[esp32] Traceback (most recent call last):
+[agent] programme de l'ESP32 arrêté : redémarrage (Ctrl-D)
+[esp32] File "<stdin>", line 1
+[esp32] SyntaxError: invalid syntax
+[esp32] >>> GPU 46 0 3
+[esp32] Traceback (most recent call last):
+[esp32] File "<stdin>", line 1
+[esp32] SyntaxError: invalid syntax
+[esp32] >>> PERF 50 -1
+[esp32] Traceback (most recent call last):
+[esp32] File "<stdin>", line 1
+[esp32] SyntaxError: invalid syntax
+[esp32] >>> EVT CASQUE Headphones (XiaomiPro)
+[esp32] Traceback (most recent call last):
+[esp32] File "<stdin>", line 1
+[esp32] SyntaxError: invalid syntax
+[esp32] >>> EVT MANETTE 0
+[esp32] Traceback (most recent call last):
+[esp32] File "<stdin>", line 1
+[esp32] SyntaxError: invalid syntax
+[esp32] >>> EVT VERROU 0
+[esp32] Traceback (most recent call last):
+[esp32] File "<stdin>", line 1
+[esp32] SyntaxError: invalid syntax
+[esp32] >>> EVT JEU -
+[esp32] Traceback (most recent call last):
+[esp32] File "<stdin>", line 1
+[esp32] SyntaxError: invalid syntax
+[esp32] >>>
+[esp32] >>>
+[esp32] >>>
+[esp32] MPY: soft reboot
+[agent] ESP32 connectée sur COM4
+[agent] événement : CASQUE = Headphones (Xiaomi蓝牙音箱Pro)
+[agent] événement : MANETTE = 0
+[agent] événement : VERROU = 0
+[agent] événement : JEU = -
+
+[lanceur] code de sortie : 0
+```
+
+Les `Traceback` / `SyntaxError` ci-dessus viennent de l'invite MicroPython de la carte (lignes STAT/GPU/PERF/EVT lues comme du Python pendant que le programme était arrêté), pas d'une erreur Python sur le PC. Après `MPY: soft reboot`, l'USB de la carte redémarre : l'agent se reconnecte (« ESP32 connectée sur COM4 ») et renvoie tous les événements ; plus aucune erreur ensuite.
+
 ## esp/main.py
 
 ```python
@@ -341,7 +433,20 @@ def dessiner():
 
 
 dessiner()
-etat_usb = "pret" if pc.demarrer() else "pas reconnu"
+def noter_erreur(e):
+    """Garde la trace d'une erreur dans erreur.txt (sur la carte) sans arrêter le programme."""
+    try:
+        with open("erreur.txt", "a") as f:
+            sys.print_exception(e, f)
+    except OSError:
+        pass
+
+
+try:
+    etat_usb = "pret" if pc.demarrer() else "pas reconnu"
+except Exception as e:  # le PC n'était peut-être pas prêt (démarrage de Windows)
+    noter_erreur(e)
+    etat_usb = "pas reconnu"
 dessiner()
 
 entree = select.poll()
@@ -437,16 +542,20 @@ def executer(ligne):
 
 
 while True:
-    ligne = lire_ligne()
-    if ligne:
-        reponse = executer(ligne.strip())
-        print(reponse)
-        if not ligne.startswith(("STAT", "EVT", "GPU", "PERF")):
-            nb += 1
-            derniere = ligne.strip()
-        if pc.is_open():
-            etat_usb = "pret"
-        dessiner()
+    try:
+        ligne = lire_ligne()
+        if ligne:
+            reponse = executer(ligne.strip())
+            print(reponse)
+            if not ligne.startswith(("STAT", "EVT", "GPU", "PERF")):
+                nb += 1
+                derniere = ligne.strip()
+            if pc.is_open():
+                etat_usb = "pret"
+            dessiner()
+    except Exception as e:  # une erreur ne doit jamais arrêter la télécommande
+        noter_erreur(e)
+        print("ERR interne : %s" % e)
     time.sleep_ms(10)
 ```
 
@@ -474,6 +583,7 @@ supprime-le pour que l'agent se reconnecte.
 """
 import argparse
 import atexit
+import collections
 import ctypes
 import glob
 import json
@@ -578,6 +688,17 @@ class Liaison:
                 except serial.SerialException:
                     pass
                 self.ser = None
+
+    def envoyer_brut(self, octets):
+        with self.verrou:
+            if self.ser is None:
+                return False
+            try:
+                self.ser.write(octets)
+                return True
+            except serial.SerialException:
+                self.ser = None
+                return False
 
     def envoyer(self, ligne):
         with self.verrou:
@@ -773,11 +894,17 @@ def pid_premier_plan():
 
 
 class CompteurFPS:
-    """Lance PresentMon et compte les images affichées par seconde, par processus."""
+    """Lance PresentMon et calcule les FPS à partir du temps entre deux images.
+
+    On utilise la colonne MsBetweenPresents (temps mesuré par Windows entre deux images),
+    pas l'heure d'arrivée des lignes : PresentMon envoie ses lignes par paquets, ce qui
+    faussait le comptage (valeurs comme 228 ou 322).
+    """
 
     def __init__(self):
         self.proc = None
-        self.compte = {}      # pid -> images depuis la dernière lecture
+        self.series = {}      # (pid, swapchain) -> durées récentes en ms
+        self.vu = {}          # (pid, swapchain) -> heure de la dernière ligne
         self.noms = {}        # pid -> nom de l'exe
         self.verrou = threading.Lock()
         self.probleme = ""
@@ -809,39 +936,65 @@ class CompteurFPS:
             self.proc.terminate()
 
     def _lire(self):
-        i_app = i_pid = None
+        col = None
         for ligne in self.proc.stdout:
             morceaux = ligne.strip().split(",")
-            if i_pid is None:
-                if "ProcessID" in morceaux and "Application" in morceaux:
-                    i_app = morceaux.index("Application")
-                    i_pid = morceaux.index("ProcessID")
+            if col is None:
+                if "ProcessID" in morceaux and "MsBetweenPresents" in morceaux:
+                    col = {nom: morceaux.index(nom) for nom in
+                           ("Application", "ProcessID", "SwapChainAddress", "MsBetweenPresents")
+                           if nom in morceaux}
                 else:
                     self.probleme = "PresentMon : " + ligne.strip()[:120]
                 continue
-            if len(morceaux) <= max(i_app, i_pid):
-                continue
             try:
-                pid = int(morceaux[i_pid])
-            except ValueError:
+                pid = int(morceaux[col["ProcessID"]])
+                ms = float(morceaux[col["MsBetweenPresents"]])
+                chaine = morceaux[col["SwapChainAddress"]] if "SwapChainAddress" in col else ""
+                app = morceaux[col["Application"]].lower() if "Application" in col else ""
+            except (ValueError, IndexError):
                 continue
+            if ms <= 0:
+                continue
+            cle = (pid, chaine)
             with self.verrou:
-                self.compte[pid] = self.compte.get(pid, 0) + 1
-                self.noms[pid] = morceaux[i_app].lower()
+                serie = self.series.get(cle)
+                if serie is None:
+                    serie = self.series[cle] = collections.deque(maxlen=300)
+                serie.append(ms)
+                self.vu[cle] = time.time()
+                self.noms[pid] = app
         self.probleme = "PresentMon s'est arrêté (droits administrateur ?)"
 
+    @staticmethod
+    def _fps_de(serie):
+        # Moyenne sur environ la dernière seconde d'images
+        total = 0.0
+        n = 0
+        for ms in reversed(serie):
+            total += ms
+            n += 1
+            if total >= 1000:
+                break
+        return round(1000 * n / total) if total > 0 else -1
+
     def fps(self):
-        """FPS de la dernière seconde pour le jeu au premier plan (ou -1)."""
-        with self.verrou:
-            compte, self.compte = self.compte, {}
-            noms = dict(self.noms)
-        if not compte:
-            return -1
+        """FPS du jeu au premier plan (ou -1)."""
+        maintenant = time.time()
         cible = pid_premier_plan()
-        if cible in compte and noms.get(cible) not in PAS_DES_JEUX:
-            return compte[cible]
-        candidats = [(n, p) for p, n in compte.items() if noms.get(p) not in PAS_DES_JEUX]
-        return max(candidats)[0] if candidats else -1
+        with self.verrou:
+            actives = {c: s for c, s in self.series.items()
+                       if maintenant - self.vu.get(c, 0) < 2 and len(s) >= 5
+                       and self.noms.get(c[0]) not in PAS_DES_JEUX}
+            # oublie les chaînes inactives depuis longtemps
+            for c in [c for c, t in self.vu.items() if maintenant - t > 30]:
+                self.vu.pop(c, None)
+                self.series.pop(c, None)
+            if not actives:
+                return -1
+            # la chaîne d'images la plus active du jeu au premier plan, sinon de tous les jeux
+            du_jeu = {c: s for c, s in actives.items() if c[0] == cible} or actives
+            return max(self._fps_de(list(s)) for s in du_jeu.values())
 
 
 def est_admin():
@@ -979,6 +1132,7 @@ class Agent:
         self.dernier_gpu = ""
         self.dernier_perf = ""
         self.precedent = {}
+        self.problemes = {}
         self.lhm = LecteurLHM()
         self.fps = CompteurFPS()
 
@@ -1021,6 +1175,10 @@ class Agent:
             fps = self.fps.fps() if en_jeu else -1
             self.dernier_perf = f"PERF {self.lhm.temperature_cpu()} {fps}"
             self.liaison.envoyer(self.dernier_perf)
+            for nom, outil in (("LibreHardwareMonitor", self.lhm), ("PresentMon", self.fps)):
+                if outil.probleme != self.problemes.get(nom):
+                    self.problemes[nom] = outil.probleme
+                    print(f"[agent] {nom} : {outil.probleme or 'OK'}")
 
             nom, externe = sortie_audio()
             etats = {
@@ -1037,6 +1195,7 @@ class Agent:
             time.sleep(1)
 
     def boucle_lecture(self):
+        dernier_redemarrage = 0.0
         while self.actif:
             ligne = self.liaison.lire_ligne()
             if ligne is None:
@@ -1044,6 +1203,14 @@ class Agent:
                 continue
             if ligne and ligne != "OK":
                 print(f"[esp32] {ligne}")
+            # L'ESP32 est retombée dans l'invite MicroPython (programme arrêté) :
+            # Ctrl-D relance main.py.
+            en_repl = ligne.startswith((">>>", "Traceback", "MicroPython v")) or "Error:" in ligne
+            if en_repl and time.time() - dernier_redemarrage > 15:
+                dernier_redemarrage = time.time()
+                print("[agent] programme de l'ESP32 arrêté : redémarrage (Ctrl-D)")
+                self.liaison.envoyer_brut(b"\r\x03\x03\x04")
+                self.precedent = {}  # renvoie tous les états une fois relancé
 
     def console(self):
         print(AIDE)

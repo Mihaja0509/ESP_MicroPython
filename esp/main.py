@@ -43,7 +43,20 @@ def dessiner():
 
 
 dessiner()
-etat_usb = "pret" if pc.demarrer() else "pas reconnu"
+def noter_erreur(e):
+    """Garde la trace d'une erreur dans erreur.txt (sur la carte) sans arrêter le programme."""
+    try:
+        with open("erreur.txt", "a") as f:
+            sys.print_exception(e, f)
+    except OSError:
+        pass
+
+
+try:
+    etat_usb = "pret" if pc.demarrer() else "pas reconnu"
+except Exception as e:  # le PC n'était peut-être pas prêt (démarrage de Windows)
+    noter_erreur(e)
+    etat_usb = "pas reconnu"
 dessiner()
 
 entree = select.poll()
@@ -139,14 +152,18 @@ def executer(ligne):
 
 
 while True:
-    ligne = lire_ligne()
-    if ligne:
-        reponse = executer(ligne.strip())
-        print(reponse)
-        if not ligne.startswith(("STAT", "EVT", "GPU", "PERF")):
-            nb += 1
-            derniere = ligne.strip()
-        if pc.is_open():
-            etat_usb = "pret"
-        dessiner()
+    try:
+        ligne = lire_ligne()
+        if ligne:
+            reponse = executer(ligne.strip())
+            print(reponse)
+            if not ligne.startswith(("STAT", "EVT", "GPU", "PERF")):
+                nb += 1
+                derniere = ligne.strip()
+            if pc.is_open():
+                etat_usb = "pret"
+            dessiner()
+    except Exception as e:  # une erreur ne doit jamais arrêter la télécommande
+        noter_erreur(e)
+        print("ERR interne : %s" % e)
     time.sleep_ms(10)
