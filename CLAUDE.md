@@ -33,6 +33,23 @@ Agent PC (`tools\agent\agent_pc.py`) : il occupe le port COM4 tant qu'il tourne.
 - Pour libérer COM4 avant mpremote ou `tools\pc_test.py` : créer le fichier `tools\agent\PAUSE` (l'agent ferme le port en ~1 s), puis le **supprimer** à la fin pour que l'agent se reconnecte.
 - Version console (`py -X utf8 tools\agent\agent_pc.py`) : la quitter avec `q`.
 - La 1re commande mpremote après un autre programme sur COM4 échoue souvent avec `ClearCommError` : la relancer une fois.
+- Météo : l'agent la télécharge (Open-Meteo, toutes les 30 min, fil à part) et l'envoie à l'ESP32 (`METEO_J`). Position dans `tools\agent\reglages.json` (créé au 1er lancement, rempli par Mihaja : `ville` ou `latitude`/`longitude`) : jamais lu, jamais commité.
+
+## Fichiers de la carte (Phase 4)
+
+- `esp/main.py` → `:main.py` : boucle messages + dessin ~12 images/s ; erreurs ajoutées dans `:erreur.txt`.
+- `esp/lib/` → `:lib/` : `lcd.py`, `hid_pc.py`, `ui.py` (scènes, mascotte, bandeaux, particules), `polices.py` (polices lissées Inter), `meteo.py` (Wi-Fi + Open-Meteo + heure, facultatif).
+- `esp/assets/` → `:assets` (38 fichiers `.bin` / `.fnt` : fonds, mascotte, icônes, météo, polices) : `fs cp -r esp/assets :`.
+- `esp/secrets.py` → `:secrets.py` (facultatif, Wi-Fi 2,4 GHz + position, modèle `esp/secrets.example.py`).
+- Régénérer les images et polices : `py -m pip install --user pillow numpy scipy`, mettre les `Inter-*.otf` dans `tools/assets/sources/`, puis `py tools\assets\generer_assets.py` (aperçus dans `tools/assets/apercus/`).
+
+## Lignes série PC → ESP32 (ajouts Phase 4)
+
+- `TEMPS annee mois jour jour_semaine h min s` : l'agent donne l'heure (à la connexion puis chaque minute).
+- `EVT ACTION <commande> [arg]` : l'agent signale une commande PC exécutée (APP, LUM, VERROU, ECRAN_OFF, VEILLE, ARRET, ANNULER…) → réaction de la mascotte.
+- `METEO_J jour icone max min pluie heure` : météo du jour `0` (aujourd'hui) ou `1` (demain) ; `heure` = -1 si pas de pluie.
+- `ECRAN_ESP 0|1` : éteindre / rallumer l'écran de l'ESP32.
+- `METEO` : relire la météo gardée (`OK orage 32/24 pluie 80% vers 15h | …`).
 
 Dans `app/` :
 - `flutter analyze`

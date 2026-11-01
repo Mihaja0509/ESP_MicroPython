@@ -10,3 +10,4 @@ __pycache__/
 # Agent PC
 tools/agent/PAUSE
 tools/agent/agent.log
+tools/agent/reglages.json

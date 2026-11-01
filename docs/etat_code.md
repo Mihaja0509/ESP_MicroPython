@@ -1,6 +1,6 @@
 # État du code — Micro
 
-Mis à jour : 2026-11-01 (fin de Phase 3-bis : ESP32 protégée, FPS justes)
+Mis à jour : 2026-11-01 (fin de Phase 4 : écran vivant, mascotte et météo)
 
 ## Arborescence
 
@@ -124,23 +124,24 @@ Dépendances PC de l'agent (`pip install --user`) :
 ## Fichiers sur la carte
 
 ```
-ls :/
+ls :
+           0 assets/
          139 boot.py
+         524 erreur.txt
            0 lib/
-        5562 main.py
-ls :/lib
+       10434 main.py
+ls :lib
         6040 hid_pc.py
         4071 lcd.py
+        5177 meteo.py
+        3495 polices.py
+       15091 ui.py
            0 usb/
-ls :/lib/usb/device
-          97 __init__.mpy
-        4411 core.mpy
-        1569 hid.mpy
 ```
 
-`erreur.txt` sera créé sur la carte à la première erreur attrapée par `noter_erreur()`.
+`:assets` : 38 fichiers (détail dans « Copie sur la carte (Phase 4, étape 4) »). Pas de `:secrets.py` (`esp/secrets.py` n'existe pas sur le PC : normal, Wi-Fi facultatif).
 
-Vérification (Phase 3-bis, étape 4) : `py -m mpremote connect COM4 fs cat :main.py` contient bien `def noter_erreur(e):`.
+`erreur.txt` (524 octets) contient uniquement d'anciennes traces de la version 3-bis (voir « Démarrage (Phase 4, étape 5) ») ; sa taille n'a pas changé après les démarrages et tests de la Phase 4.
 
 ## Installation de usb-device-hid (Phase 1, étape 4)
 
@@ -385,54 +386,157 @@ Toute autre commande (KEY win+d, TEXT …, VOL+, MOUSE 100 0, CLIC…) part à l
 
 Les `Traceback` / `SyntaxError` ci-dessus viennent de l'invite MicroPython de la carte (lignes STAT/GPU/PERF/EVT lues comme du Python pendant que le programme était arrêté), pas d'une erreur Python sur le PC. Après `MPY: soft reboot`, l'USB de la carte redémarre : l'agent se reconnecte (« ESP32 connectée sur COM4 ») et renvoie tous les événements ; plus aucune erreur ensuite.
 
+## Copie sur la carte (Phase 4, étape 4)
+
+- `tools\agent\PAUSE` créé, attente 3 s. `py -m mpremote devs` : COM4 (303a:4001).
+- `fs cp esp/main.py :main.py` : ClearCommError au 1er essai, réussi au 2e (après 3 s). Dernière ligne de la trace :
+
+```
+serial.serialutil.SerialException: ClearCommError failed (PermissionError(13, 'The device does not recognize the command.', None, 22))
+```
+
+- `fs mkdir :lib` : `mpremote: mkdir: lib: File exists.` (normal).
+- `fs cp esp/lib/ui.py :lib/ui.py + fs cp esp/lib/polices.py :lib/polices.py + fs cp esp/lib/meteo.py :lib/meteo.py` : OK.
+- `fs cp -r esp/assets :` : OK.
+- `esp/secrets.py` n'existe pas : rien copié en `:secrets.py` (normal).
+- Module requests : `exec "import requests"` → sans erreur (`requests OK`).
+
+```
+ls :assets
+        3344 bulle_manette.bin
+      110080 fond_jeu.bin
+      110080 fond_jour.bin
+      110080 fond_nuit.bin
+         648 ico_appli.bin
+         648 ico_cadenas.bin
+         288 ico_casque.bin
+         648 ico_clavier.bin
+         648 ico_coucou.bin
+         288 ico_eclair.bin
+         648 ico_lune.bin
+         648 ico_manette.bin
+         648 ico_muet.bin
+         648 ico_musique.bin
+         648 ico_power.bin
+         648 ico_soleil.bin
+         648 ico_son.bin
+         648 ico_souris.bin
+        1152 meteo_brouillard.bin
+        1152 meteo_eclaircie.bin
+        1152 meteo_neige.bin
+        1152 meteo_nuage.bin
+        1152 meteo_orage.bin
+        1152 meteo_pluie.bin
+        1152 meteo_soleil.bin
+       28500 perso_cou_cligne.bin
+       28500 perso_cou_content.bin
+       28500 perso_cou_neutre.bin
+       28500 perso_cou_surpris.bin
+       28500 perso_oreilles_cligne.bin
+       28500 perso_oreilles_content.bin
+       28500 perso_oreilles_neutre.bin
+       28500 perso_oreilles_surpris.bin
+       26292 police_fps.fnt
+       14754 police_heure.fnt
+       23990 police_m.fnt
+       15763 police_s.fnt
+       11980 police_xs.fnt
+```
+
+```
+> py -m mpremote connect COM4 exec "import os; s=os.statvfs('/'); print(s[0]*s[3]//1024, 'Ko libres'); print(len(os.listdir('/assets')), 'fichiers assets')"
+13460 Ko libres
+38 fichiers assets
+```
+
+## Démarrage (Phase 4, étape 5)
+
+- `:erreur.txt` existait déjà avant le reset (524 octets). Contenu (anciennes traces : `main.py` ligne 71 = `lire_ligne` de la version 3-bis) :
+
+```
+Traceback (most recent call last):
+  File "main.py", line 156, in <module>
+  File "main.py", line 71, in lire_ligne
+UnicodeError: 
+Traceback (most recent call last):
+  File "main.py", line 156, in <module>
+  File "main.py", line 71, in lire_ligne
+UnicodeError: 
+Traceback (most recent call last):
+  File "main.py", line 156, in <module>
+  File "main.py", line 71, in lire_ligne
+UnicodeError: 
+Traceback (most recent call last):
+  File "main.py", line 156, in <module>
+  File "main.py", line 71, in lire_ligne
+UnicodeError: 
+```
+
+- `reset` (1er essai : ClearCommError dans `ensure_raw_repl`, 2e essai OK), puis lecture de COM4 pendant 10 s (pyserial, 115200, réouverture du port pendant le redémarrage USB) : **0 octet reçu**, aucune trace. Normal : le nouveau `main.py` n'affiche rien au démarrage (il ne répond qu'aux lignes reçues ; les erreurs vont dans `erreur.txt`).
+- Après le démarrage : `fs ls :` → `erreur.txt` toujours 524 octets (aucune nouvelle erreur).
+
+## Réponses de la carte (Phase 4, étape 6)
+
+Après un `reset` (pour relancer `main.py`), PAUSE toujours présent :
+
+```
+> py -X utf8 tools\pc_test.py COM4 --cmd "METEO_J 0 orage 32 24 80 15"
+  -> OK
+> py -X utf8 tools\pc_test.py COM4 --cmd METEO
+  -> OK orage 32/24 pluie 80% vers 15h
+> py -X utf8 tools\pc_test.py COM4 --cmd "STAT 23 61 48 76 1"
+  -> OK
+> py -X utf8 tools\pc_test.py COM4 --cmd "EVT JEU Test"
+  -> OK
+> py -X utf8 tools\pc_test.py COM4 --cmd "EVT JEU -"
+  -> OK
+> py -X utf8 tools\pc_test.py COM4 --cmd "VOL+"
+  -> OK
+```
+
+Ensuite : `fs ls :` (`erreur.txt` toujours 524 octets), `tools\agent\PAUSE` supprimé, `reset` de la carte (l'agent en fond reprend COM4).
+
 ## esp/main.py
 
 ```python
-# Phase 1 : l'ESP32 devient clavier + souris + multimédia du PC.
-# Les ordres arrivent par le port série USB, une ligne par commande.
+# Phase 4 : Télécommande PC avec écran animé.
+# - Les ordres et les données arrivent du PC par le port série USB (une ligne par message).
+# - L'ESP32 joue le rôle de clavier + souris + touches multimédia (hid_pc.py).
+# - L'écran est dessiné par ui.py environ 12 fois par seconde.
 import select
 import sys
 import time
 
+import machine
+
 import lcd
 from hid_pc import MEDIA, PC
+from meteo import Meteo
+from ui import Interface
+
+try:
+    import secrets as reglages  # /secrets.py sur la carte : Wi-Fi + position (jamais dans Git)
+except ImportError:
+    reglages = None
 
 ecran = lcd.Ecran(paysage=True)
+ui = Interface(ecran)
 pc = PC()
-etat_usb = "connexion..."
-derniere = "-"
-nb = 0
-# Valeurs envoyées par le programme PC (agent_pc.py)
+
+# Valeurs envoyées par le programme PC (agent_pc.py) ; -1 = inconnu
 stat = {"cpu": -1, "ram": -1, "vol": -1, "bat": -1, "chg": 0}
-evt = {"casque": "", "manette": 0, "verrou": 0, "jeu": ""}
 gpu = {"temp": -1, "charge": -1, "vram": -1}
 perf = {"cpu_temp": -1, "fps": -1}
+evt = {"casque": "", "manette": 0, "verrou": 0, "jeu": ""}
+etat = {"connecte": False, "stat": stat, "gpu": gpu, "perf": perf, "evt": evt, "meteo": []}
+
+ATTENTE_ABSENT = 8000      # sans données depuis 8 s = PC éteint / en veille / agent arrêté
+IMAGE_MS = 80              # une image toutes les 80 ms (≈ 12 images / s)
+derniere_donnee = time.ticks_add(time.ticks_ms(), -ATTENTE_ABSENT)
+ecran_allume = True
+luminosite_actuelle = -1
 
 
-def dessiner():
-    f = ecran.fb
-    f.fill(lcd.NOIR)
-    ecran.texte("Telecommande PC", 10, 8, lcd.CYAN, 2)
-    couleur_usb = lcd.VERT if etat_usb == "pret" else lcd.ORANGE
-    ecran.texte("USB : " + etat_usb, 10, 40, couleur_usb, 2)
-    if evt["jeu"]:
-        ecran.texte("JEU : " + evt["jeu"][:34], 10, 64, lcd.VERT, 1)
-    ecran.texte("GPU %dC %d%%  CPU %dC  FPS %d" % (gpu["temp"], gpu["charge"],
-                                                   perf["cpu_temp"], perf["fps"]),
-                10, 78, lcd.VERT if evt["jeu"] else lcd.GRIS, 1)
-    ecran.texte(derniere[:19], 10, 92, lcd.BLANC, 2)
-    ecran.texte("CPU %d%%  RAM %d%%  Vol %d%%" % (stat["cpu"], stat["ram"], stat["vol"]),
-                10, 118, lcd.ORANGE, 1)
-    ecran.texte("Batterie %d%%%s" % (stat["bat"], " (en charge)" if stat["chg"] else ""),
-                10, 132, lcd.ORANGE, 1)
-    ecran.texte("Casque : " + (evt["casque"][:30] or "non"), 10, 146, lcd.CYAN, 1)
-    ecran.texte("Manette : %s   Verrou : %s" % ("oui" if evt["manette"] else "non",
-                                                "oui" if evt["verrou"] else "non"),
-                10, 160, lcd.CYAN, 1)
-    ecran.afficher()
-
-
-dessiner()
 def noter_erreur(e):
     """Garde la trace d'une erreur dans erreur.txt (sur la carte) sans arrêter le programme."""
     try:
@@ -442,12 +546,14 @@ def noter_erreur(e):
         pass
 
 
+# Premier dessin tout de suite (écran « Bonjour »), puis déclaration du clavier/souris au PC
+ui.dessiner(etat, time.ticks_ms())
+meteo = Meteo(reglages)  # lance la connexion Wi-Fi (sans attendre)
 try:
-    etat_usb = "pret" if pc.demarrer() else "pas reconnu"
+    usb_ok = pc.demarrer()
 except Exception as e:  # le PC n'était peut-être pas prêt (démarrage de Windows)
     noter_erreur(e)
-    etat_usb = "pas reconnu"
-dessiner()
+    usb_ok = False
 
 entree = select.poll()
 entree.register(sys.stdin, select.POLLIN)
@@ -455,7 +561,8 @@ tampon = ""
 
 
 def lire_ligne():
-    """Renvoie une ligne complète reçue sur le port série, ou None."""
+    """Renvoie une ligne complète reçue sur le port série, ou None.
+    Les caractères bizarres (parasites au démarrage du PC) sont ignorés."""
     global tampon
     while entree.poll(0):
         c = sys.stdin.read(1)
@@ -464,17 +571,87 @@ def lire_ligne():
                 ligne = tampon
                 tampon = ""
                 return ligne
-        else:
+        elif " " <= c <= "~" or ord(c) > 159:
             tampon += c
+            if len(tampon) > 300:
+                tampon = ""
     return None
 
 
+TOUCHES_LISIBLES = {"win": "Win", "ctrl": "Ctrl", "alt": "Alt", "shift": "Maj"}
+
+
+def joli_raccourci(texte):
+    morceaux = []
+    for m in texte.split("+"):
+        m = m.strip().lower()
+        morceaux.append(TOUCHES_LISIBLES.get(m, m.upper() if len(m) == 1 else m.capitalize()))
+    return " + ".join(morceaux)
+
+
+REACTIONS_MEDIA = {
+    "VOL+": ("son", "Volume +"), "VOL-": ("son", "Volume -"), "MUTE": ("muet", "Muet"),
+    "PLAY": ("musique", "Lecture / pause"), "NEXT": ("musique", "Suivant"),
+    "PREV": ("musique", "Précédent"), "LUM+": ("soleil", "Luminosité +"),
+    "LUM-": ("soleil", "Luminosité -"),
+}
+
+
+def reaction_action(arg):
+    """Réaction de la mascotte à une commande exécutée par le programme PC (EVT ACTION …)."""
+    mots = arg.split(" ", 1)
+    nom = mots[0].upper()
+    reste = mots[1].strip() if len(mots) > 1 else ""
+    if nom == "APP":
+        ui.reagir("appli", reste.capitalize() or "Application")
+    elif nom in ("LUM", "LUM+", "LUM-"):
+        ui.reagir("soleil", "Luminosité %s %%" % reste if reste else "Luminosité")
+    elif nom == "VERROU":
+        ui.reagir("cadenas", "Verrouillage")
+    elif nom == "ECRAN_OFF":
+        ui.reagir("lune", "Écran éteint")
+    elif nom == "VEILLE":
+        ui.reagir("lune", "Mise en veille")
+    elif nom == "ARRET":
+        ui.reagir("power", "Arrêt du PC…")
+    elif nom == "ANNULER":
+        ui.reagir("power", "Arrêt annulé")
+    else:
+        ui.reagir("appli", arg[:24])
+
+
 def executer(ligne):
+    global derniere_donnee, ecran_allume
     mots = ligne.split(" ", 1)
     cmd = mots[0].upper()
     arg = mots[1] if len(mots) > 1 else ""
     if cmd == "PING":
         return "PONG"
+    if cmd == "METEO":
+        if etat["meteo"]:
+            return "OK " + " | ".join("%s %d/%d pluie %d%% vers %sh" % (
+                j["icone"], j["tmax"], j["tmin"], j["pluie"], j["heure_pluie"]) for j in etat["meteo"])
+        return "ERR pas encore de meteo (" + (meteo.probleme or "attente") + ")"
+    if cmd == "METEO_J":
+        # météo envoyée par le programme PC : METEO_J jour icone max min pluie heure
+        try:
+            p = arg.split()
+            i = int(p[0])
+            heure = int(p[5])
+            jour = {"icone": p[1], "tmax": int(p[2]), "tmin": int(p[3]), "pluie": int(p[4]),
+                    "heure_pluie": heure if heure >= 0 else None}
+        except (ValueError, IndexError):
+            return "ERR utilise : METEO_J jour icone max min pluie heure"
+        liste = list(etat["meteo"])
+        while len(liste) <= i:
+            liste.append(jour)
+        liste[i] = jour
+        etat["meteo"] = liste
+        return "OK"
+    # --- données du programme PC -------------------------------------------
+    if cmd in ("STAT", "GPU", "PERF", "EVT", "TEMPS", "METEO_J"):
+        derniere_donnee = time.ticks_ms()
+        etat["connecte"] = True
     if cmd == "STAT":
         try:
             v = [int(x) for x in arg.split()]
@@ -482,42 +659,71 @@ def executer(ligne):
         except ValueError:
             return "ERR utilise : STAT cpu ram vol bat charge"
         return "OK"
-    if cmd == "PERF":
-        try:
-            perf["cpu_temp"], perf["fps"] = [int(x) for x in arg.split()][:2]
-        except ValueError:
-            return "ERR utilise : PERF temp_cpu fps"
-        return "OK"
     if cmd == "GPU":
         try:
             gpu["temp"], gpu["charge"], gpu["vram"] = [int(x) for x in arg.split()][:3]
         except ValueError:
             return "ERR utilise : GPU temp charge vram"
         return "OK"
+    if cmd == "PERF":
+        try:
+            perf["cpu_temp"], perf["fps"] = [int(x) for x in arg.split()][:2]
+        except ValueError:
+            return "ERR utilise : PERF temp_cpu fps"
+        return "OK"
+    if cmd == "TEMPS":
+        try:
+            a, mo, j, js, h, mi, s = [int(x) for x in arg.split()][:7]
+            machine.RTC().datetime((a, mo, j, js, h, mi, s, 0))
+        except (ValueError, OSError):
+            return "ERR utilise : TEMPS annee mois jour jour_semaine h min s"
+        return "OK"
     if cmd == "EVT":
         morceaux = arg.split(" ", 1)
         typ = morceaux[0].upper()
         val = morceaux[1].strip() if len(morceaux) > 1 else ""
         if typ == "CASQUE":
+            ancien = evt["casque"]
             evt["casque"] = "" if val in ("", "-") else val
+            if evt["casque"] and not ancien:
+                ui.reagir("son", "Casque connecté")
+            elif ancien and not evt["casque"]:
+                ui.reagir("son", "Casque retiré")
         elif typ == "MANETTE":
-            evt["manette"] = 1 if val == "1" else 0
+            nouveau = 1 if val == "1" else 0
+            if nouveau and not evt["manette"]:
+                ui.reagir("manette", "Manette connectée")
+            evt["manette"] = nouveau
         elif typ == "VERROU":
             evt["verrou"] = 1 if val == "1" else 0
         elif typ == "JEU":
             evt["jeu"] = "" if val in ("", "-") else val
+        elif typ == "ACTION":
+            reaction_action(val)
         else:
             return "ERR evenement inconnu : " + typ
         return "OK"
-    if etat_usb != "pret" and not pc.is_open():
+    # --- écran de l'ESP32 ----------------------------------------------------
+    if cmd == "ECRAN_ESP":
+        ecran_allume = arg.strip() != "0"
+        if not ecran_allume:
+            ecran.luminosite(0)
+        return "OK"
+    # --- clavier / souris / multimédia ----------------------------------------
+    if not pc.is_open():
         return "ERR USB pas reconnu par le PC"
     if cmd == "KEY":
-        return "OK" if pc.raccourci(arg) else "ERR touche inconnue : " + arg
+        if not pc.raccourci(arg):
+            return "ERR touche inconnue : " + arg
+        ui.reagir("clavier", joli_raccourci(arg))
+        return "OK"
     if cmd == "TEXT":
         ignores = pc.taper(arg)
+        ui.reagir("clavier", "Texte envoyé")
         return "OK" if ignores == 0 else "OK (%d caracteres ignores)" % ignores
     if cmd in MEDIA:
         pc.media(cmd)
+        ui.reagir(*REACTIONS_MEDIA[cmd])
         return "OK"
     if cmd == "MOUSE":
         try:
@@ -525,38 +731,58 @@ def executer(ligne):
         except ValueError:
             return "ERR utilise : MOUSE dx dy"
         pc.souris(dx, dy)
+        ui.reagir("souris", "Souris", bandeau=False)
         return "OK"
     if cmd == "CLIC":
         pc.clic(1)
+        ui.reagir("souris", "Clic", bandeau=False)
         return "OK"
     if cmd == "CLICD":
         pc.clic(2)
+        ui.reagir("souris", "Clic droit", bandeau=False)
         return "OK"
     if cmd == "MOLETTE":
         try:
             pc.souris(molette=int(arg))
         except ValueError:
             return "ERR utilise : MOLETTE n"
+        ui.reagir("souris", "Défilement", bandeau=False)
         return "OK"
     return "ERR commande inconnue : " + cmd
 
 
+prochaine_image = time.ticks_ms()
 while True:
     try:
-        ligne = lire_ligne()
-        if ligne:
-            reponse = executer(ligne.strip())
-            print(reponse)
-            if not ligne.startswith(("STAT", "EVT", "GPU", "PERF")):
-                nb += 1
-                derniere = ligne.strip()
-            if pc.is_open():
-                etat_usb = "pret"
-            dessiner()
+        # 1. tous les messages en attente (au plus 30 d'un coup)
+        for _ in range(30):
+            ligne = lire_ligne()
+            if ligne is None:
+                break
+            print(executer(ligne.strip()))
+        maintenant = time.ticks_ms()
+        if etat["connecte"] and time.ticks_diff(maintenant, derniere_donnee) > ATTENTE_ABSENT:
+            etat["connecte"] = False
+        # météo : seulement quand le PC n'est pas utilisé (le téléchargement bloque 1 à 3 s)
+        if (not etat["connecte"] or evt["verrou"]) and meteo.a_mettre_a_jour(maintenant):
+            if meteo.mettre_a_jour(maintenant):
+                etat["meteo"] = meteo.jours
+        # 2. une nouvelle image si c'est l'heure
+        if time.ticks_diff(maintenant, prochaine_image) >= 0:
+            prochaine_image = time.ticks_add(maintenant, IMAGE_MS)
+            if ecran_allume:
+                ui.dessiner(etat, maintenant)
+                voulue = ui.luminosite_voulue(maintenant)
+                if voulue != luminosite_actuelle:
+                    luminosite_actuelle = voulue
+                    ecran.luminosite(voulue)
+            else:
+                luminosite_actuelle = -1
     except Exception as e:  # une erreur ne doit jamais arrêter la télécommande
         noter_erreur(e)
         print("ERR interne : %s" % e)
-    time.sleep_ms(10)
+        time.sleep_ms(200)
+    time.sleep_ms(2)
 ```
 
 ## tools/agent/agent_pc.py

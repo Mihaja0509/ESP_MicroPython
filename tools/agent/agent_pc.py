@@ -7,6 +7,10 @@
   jeu Steam en cours (lignes « EVT »).
 - Mode gamer : température du processeur (LibreHardwareMonitor) et FPS du jeu (PresentMon),
   ligne « PERF » chaque seconde.
+- Météo d'aujourd'hui et de demain (Open-Meteo) toutes les 30 min, lignes « METEO_J »
+  (position dans tools\\agent\\reglages.json).
+- Envoie l'heure du PC (ligne « TEMPS ») à la connexion puis chaque minute.
+- Prévient l'ESP32 de chaque commande PC exécutée (« EVT ACTION … ») pour que la mascotte réagisse.
 - Exécute les commandes « PC » : ouvrir une app, luminosité, verrouiller, écran éteint,
   veille, arrêt. Les autres commandes (KEY, TEXT, VOL+, MOUSE…) sont transmises à l'ESP32.
 
@@ -28,6 +32,7 @@ import sys
 import threading
 import time
 import unicodedata
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -58,6 +63,12 @@ DOSSIER = Path(__file__).resolve().parent
 FICHIER_APPS = DOSSIER / "apps.json"
 FICHIER_PAUSE = DOSSIER / "PAUSE"
 FICHIER_LOG = DOSSIER / "agent.log"
+FICHIER_REGLAGES = DOSSIER / "reglages.json"
+REGLAGES_DEFAUT = {"ville": "", "latitude": None, "longitude": None}
+URL_METEO = ("https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
+             "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max"
+             "&hourly=precipitation_probability&timezone=auto&forecast_days=2")
+URL_VILLE = "https://geocoding-api.open-meteo.com/v1/search?count=1&language=fr&name={nom}"
 URL_LHM = "http://localhost:8085/data.json"
 # Processus jamais considérés comme des jeux pour le calcul des FPS
 PAS_DES_JEUX = {"dwm.exe", "explorer.exe", "steamwebhelper.exe", "steam.exe",
@@ -469,6 +480,111 @@ class CompteurFPS:
             return max(self._fps_de(list(s)) for s in du_jeu.values())
 
 
+def icone_meteo(code):
+    """Code météo WMO -> nom d'icône de l'écran."""
+    if code == 0:
+        return "soleil"
+    if code in (1, 2):
+        return "eclaircie"
+    if code == 3:
+        return "nuage"
+    if code in (45, 48):
+        return "brouillard"
+    if 71 <= code <= 77 or code in (85, 86):
+        return "neige"
+    if code >= 95:
+        return "orage"
+    if 51 <= code <= 82:
+        return "pluie"
+    return "nuage"
+
+
+def _json(url):
+    with urllib.request.urlopen(url, timeout=10) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
+class Meteo:
+    """Récupère la météo d'aujourd'hui et de demain, sans bloquer l'agent."""
+
+    def __init__(self):
+        self.jours = []
+        self.version = 0          # augmente à chaque nouvelle météo
+        self.derniere = 0.0
+        self.probleme = ""
+        self.en_cours = False
+        self.position = None
+
+    def _reglages(self):
+        if not FICHIER_REGLAGES.exists():
+            FICHIER_REGLAGES.write_text(json.dumps(REGLAGES_DEFAUT, ensure_ascii=False, indent=2),
+                                        encoding="utf-8")
+        return json.loads(FICHIER_REGLAGES.read_text(encoding="utf-8"))
+
+    def _trouver_position(self):
+        r = self._reglages()
+        if r.get("latitude") is not None and r.get("longitude") is not None:
+            return float(r["latitude"]), float(r["longitude"])
+        ville = (r.get("ville") or "").strip()
+        if not ville:
+            raise ValueError(f"position non réglée : remplis {FICHIER_REGLAGES}")
+        res = _json(URL_VILLE.format(nom=urllib.parse.quote(ville))).get("results") or []
+        if not res:
+            raise ValueError(f"ville introuvable : {ville}")
+        return float(res[0]["latitude"]), float(res[0]["longitude"])
+
+    def a_mettre_a_jour(self):
+        attente = 1800 if self.jours else 300  # 30 min, ou 5 min tant qu'on n'a rien
+        return not self.en_cours and time.time() - self.derniere > attente
+
+    def lancer(self):
+        self.en_cours = True
+        self.derniere = time.time()
+        threading.Thread(target=self._telecharger, daemon=True).start()
+
+    def _telecharger(self):
+        try:
+            if self.position is None:
+                self.position = self._trouver_position()
+            lat, lon = self.position
+            d = _json(URL_METEO.format(lat=lat, lon=lon))
+            self.jours = self._lire(d)
+            self.version += 1
+            self.probleme = ""
+        except Exception as e:
+            self.probleme = f"météo : {e}"
+        finally:
+            self.en_cours = False
+
+    @staticmethod
+    def _lire(d):
+        jour = d["daily"]
+        heures = d["hourly"]["time"]
+        pluie_h = d["hourly"]["precipitation_probability"]
+        lt = time.localtime()
+        aujourdhui = time.strftime("%Y-%m-%d", lt)
+        jours = []
+        for i in range(min(2, len(jour["time"]))):
+            date = jour["time"][i]
+            meilleure, heure = -1, -1
+            for t, p in zip(heures, pluie_h):
+                if not t.startswith(date) or p is None:
+                    continue
+                h = int(t[11:13])
+                if date == aujourdhui and h < lt.tm_hour:
+                    continue  # aujourd'hui : seulement les heures à venir
+                if p > meilleure:
+                    meilleure, heure = p, h
+            jours.append((icone_meteo(int(jour["weather_code"][i] or 0)),
+                          round(jour["temperature_2m_max"][i]), round(jour["temperature_2m_min"][i]),
+                          meilleure, heure))
+        return jours
+
+    def lignes(self):
+        return [f"METEO_J {i} {ic} {tmax} {tmin} {pluie} {heure}"
+                for i, (ic, tmax, tmin, pluie, heure) in enumerate(self.jours)]
+
+
 def est_admin():
     try:
         return bool(ctypes.windll.shell32.IsUserAnAdmin())
@@ -605,6 +721,9 @@ class Agent:
         self.dernier_perf = ""
         self.precedent = {}
         self.problemes = {}
+        self.dernier_temps = 0.0
+        self.meteo = Meteo()
+        self.meteo_envoyee = -1
         self.lhm = LecteurLHM()
         self.fps = CompteurFPS()
 
@@ -633,6 +752,13 @@ class Agent:
                     time.sleep(3)
                     continue
                 self.precedent = {}  # renvoie tous les états après reconnexion
+                self.dernier_temps = 0.0
+                self.meteo_envoyee = -1
+            if time.time() - self.dernier_temps > 60:
+                self.dernier_temps = time.time()
+                lt = time.localtime()
+                self.liaison.envoyer(f"TEMPS {lt.tm_year} {lt.tm_mon} {lt.tm_mday} {lt.tm_wday} "
+                                     f"{lt.tm_hour} {lt.tm_min} {lt.tm_sec}")
             cpu = round(psutil.cpu_percent(interval=None))
             ram = round(psutil.virtual_memory().percent)
             bat, charge = batterie()
@@ -647,7 +773,14 @@ class Agent:
             fps = self.fps.fps() if en_jeu else -1
             self.dernier_perf = f"PERF {self.lhm.temperature_cpu()} {fps}"
             self.liaison.envoyer(self.dernier_perf)
-            for nom, outil in (("LibreHardwareMonitor", self.lhm), ("PresentMon", self.fps)):
+            if self.meteo.a_mettre_a_jour():
+                self.meteo.lancer()
+            if self.meteo.jours and self.meteo_envoyee != self.meteo.version:
+                self.meteo_envoyee = self.meteo.version
+                for ligne in self.meteo.lignes():
+                    self.liaison.envoyer(ligne)
+            for nom, outil in (("LibreHardwareMonitor", self.lhm), ("PresentMon", self.fps),
+                               ("Météo", self.meteo)):
                 if outil.probleme != self.problemes.get(nom):
                     self.problemes[nom] = outil.probleme
                     print(f"[agent] {nom} : {outil.probleme or 'OK'}")
@@ -683,6 +816,8 @@ class Agent:
                 print("[agent] programme de l'ESP32 arrêté : redémarrage (Ctrl-D)")
                 self.liaison.envoyer_brut(b"\r\x03\x03\x04")
                 self.precedent = {}  # renvoie tous les états une fois relancé
+                self.dernier_temps = 0.0
+                self.meteo_envoyee = -1
 
     def console(self):
         print(AIDE)
@@ -698,6 +833,7 @@ class Agent:
             if ligne.upper() == "ETAT":
                 print(self.dernier_stat, self.dernier_gpu, self.dernier_perf, self.precedent)
                 print("Colonnes PresentMon :", self.fps.entete or "(pas encore reçues)")
+                print("Météo :", self.meteo.lignes() or self.meteo.probleme or "en cours…")
                 print("LibreHardwareMonitor :", self.lhm.probleme or "OK",
                       "| PresentMon :", self.fps.probleme or "OK",
                       "| administrateur :", "oui" if est_admin() else "non")
@@ -710,6 +846,9 @@ class Agent:
             reponse = executer_pc(ligne)
             if reponse is not None:
                 print(reponse)
+                if ligne.split(" ", 1)[0].upper() not in ("APPS", "AUDIO"):
+                    # la mascotte réagit sur l'écran de l'ESP32
+                    self.liaison.envoyer("EVT ACTION " + texte_ascii(ligne))
             elif not self.liaison.envoyer(ligne):
                 print("ESP32 non connectée")
         self.actif = False
