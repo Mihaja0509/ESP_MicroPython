@@ -28,7 +28,11 @@ Carte (le port change après un flash ou un reset USB : le retrouver avec `devs`
 - `py -m mpremote connect <port> reset` : redémarrer
 - `py -m mpremote connect <port> repl` : console interactive (Ctrl-] pour quitter)
 
-Agent PC (`py -X utf8 tools\agent\agent_pc.py`) : il occupe le port COM4 tant qu'il tourne. Le quitter (`q`) avant d'utiliser mpremote ou `tools\pc_test.py`.
+Agent PC (`tools\agent\agent_pc.py`) : il occupe le port COM4 tant qu'il tourne.
+- En fond : tâche planifiée « ESP32 Telecommande Agent » (pythonw, `--service`, administrateur, journal `tools\agent\agent.log`).
+- Pour libérer COM4 avant mpremote ou `tools\pc_test.py` : créer le fichier `tools\agent\PAUSE` (l'agent ferme le port en ~1 s), puis le **supprimer** à la fin pour que l'agent se reconnecte.
+- Version console (`py -X utf8 tools\agent\agent_pc.py`) : la quitter avec `q`.
+- La 1re commande mpremote après un autre programme sur COM4 échoue souvent avec `ClearCommError` : la relancer une fois.
 
 Dans `app/` :
 - `flutter analyze`

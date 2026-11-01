@@ -5,20 +5,28 @@
 - Envoie chaque seconde la carte graphique NVIDIA : température, charge, mémoire (ligne « GPU »).
 - Surveille et signale : sortie audio (casque ou haut-parleurs), manette, PC verrouillé,
   jeu Steam en cours (lignes « EVT »).
+- Mode gamer : température du processeur (LibreHardwareMonitor) et FPS du jeu (PresentMon),
+  ligne « PERF » chaque seconde.
 - Exécute les commandes « PC » : ouvrir une app, luminosité, verrouiller, écran éteint,
   veille, arrêt. Les autres commandes (KEY, TEXT, VOL+, MOUSE…) sont transmises à l'ESP32.
 
 Utilisation (dans le dossier Micro) :
-  py -X utf8 tools\\agent\\agent_pc.py            port trouvé tout seul
+  py -X utf8 tools\\agent\\agent_pc.py            port trouvé tout seul, avec console
   py -X utf8 tools\\agent\\agent_pc.py --port COM4
+  pythonw tools\\agent\\agent_pc.py --service   sans console (démarrage automatique)
+Pour libérer le port COM (mise à jour de la carte), crée le fichier tools\\agent\\PAUSE ;
+supprime-le pour que l'agent se reconnecte.
 """
 import argparse
+import atexit
 import ctypes
+import glob
 import json
 import subprocess
 import sys
 import threading
 import time
+import urllib.request
 from pathlib import Path
 
 import psutil
@@ -46,6 +54,12 @@ import winreg
 
 DOSSIER = Path(__file__).resolve().parent
 FICHIER_APPS = DOSSIER / "apps.json"
+FICHIER_PAUSE = DOSSIER / "PAUSE"
+FICHIER_LOG = DOSSIER / "agent.log"
+URL_LHM = "http://localhost:8085/data.json"
+# Processus jamais considérés comme des jeux pour le calcul des FPS
+PAS_DES_JEUX = {"dwm.exe", "explorer.exe", "steamwebhelper.exe", "steam.exe",
+                "chrome.exe", "msedge.exe", "code.exe", "<unknown>"}
 APPS_DEFAUT = {
     "spotify": "spotify:",
     "youtube": "https://www.youtube.com",
@@ -100,6 +114,15 @@ class Liaison:
             print(f"[agent] impossible d'ouvrir {port} : {e}")
             self.ser = None
             return False
+
+    def fermer(self):
+        with self.verrou:
+            if self.ser is not None:
+                try:
+                    self.ser.close()
+                except serial.SerialException:
+                    pass
+                self.ser = None
 
     def envoyer(self, ligne):
         with self.verrou:
@@ -244,6 +267,135 @@ def jeu_steam():
     return f"Jeu Steam {appid}"
 
 
+class LecteurLHM:
+    """Température du processeur lue dans le serveur web de LibreHardwareMonitor."""
+
+    def __init__(self):
+        self.reessayer_a = 0.0
+        self.probleme = ""
+
+    def temperature_cpu(self):
+        if time.time() < self.reessayer_a:
+            return -1
+        try:
+            with urllib.request.urlopen(URL_LHM, timeout=0.5) as r:
+                arbre = json.loads(r.read().decode("utf-8", errors="ignore"))
+        except Exception as e:
+            self.probleme = f"LibreHardwareMonitor injoignable ({e.__class__.__name__})"
+            self.reessayer_a = time.time() + 10
+            return -1
+        self.probleme = ""
+        valeurs = {}
+        self._parcourir(arbre, "", valeurs)
+        for nom in ("CPU Package", "Core Max", "Core Average", "Core (Tctl/Tdie)"):
+            if nom in valeurs:
+                return round(valeurs[nom])
+        return -1
+
+    def _parcourir(self, noeud, parent, valeurs):
+        texte = str(noeud.get("Text", ""))
+        identifiant = str(noeud.get("SensorId", ""))
+        est_cpu = "cpu" in identifiant.lower() or not identifiant
+        if parent == "Temperatures" and not noeud.get("Children") and est_cpu:
+            v = noeud.get("RawValue")
+            if not isinstance(v, (int, float)):
+                brut = str(noeud.get("Value", "")).split(" ")[0].replace(",", ".")
+                try:
+                    v = float(brut)
+                except ValueError:
+                    v = None
+            if v is not None and texte not in valeurs:
+                valeurs[texte] = float(v)
+        for enfant in noeud.get("Children", []) or []:
+            self._parcourir(enfant, texte, valeurs)
+
+
+def pid_premier_plan():
+    u = ctypes.windll.user32
+    pid = ctypes.c_ulong(0)
+    u.GetWindowThreadProcessId(u.GetForegroundWindow(), ctypes.byref(pid))
+    return pid.value
+
+
+class CompteurFPS:
+    """Lance PresentMon et compte les images affichées par seconde, par processus."""
+
+    def __init__(self):
+        self.proc = None
+        self.compte = {}      # pid -> images depuis la dernière lecture
+        self.noms = {}        # pid -> nom de l'exe
+        self.verrou = threading.Lock()
+        self.probleme = ""
+
+    def exe(self):
+        trouves = sorted(glob.glob(str(DOSSIER / "bin" / "PresentMon*.exe")))
+        return trouves[-1] if trouves else None
+
+    def demarrer(self):
+        chemin = self.exe()
+        if chemin is None:
+            self.probleme = "PresentMon absent de tools\\agent\\bin"
+            return False
+        cmd = [chemin, "--output_stdout", "--no_console_stats", "--v1_metrics",
+               "--stop_existing_session", "--session_name", "ESP32Telecommande"]
+        try:
+            self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                         text=True, encoding="utf-8", errors="ignore",
+                                         creationflags=0x08000000)  # pas de fenêtre
+        except OSError as e:
+            self.probleme = f"PresentMon ne démarre pas : {e}"
+            return False
+        atexit.register(self.arreter)
+        threading.Thread(target=self._lire, daemon=True).start()
+        return True
+
+    def arreter(self):
+        if self.proc is not None and self.proc.poll() is None:
+            self.proc.terminate()
+
+    def _lire(self):
+        i_app = i_pid = None
+        for ligne in self.proc.stdout:
+            morceaux = ligne.strip().split(",")
+            if i_pid is None:
+                if "ProcessID" in morceaux and "Application" in morceaux:
+                    i_app = morceaux.index("Application")
+                    i_pid = morceaux.index("ProcessID")
+                else:
+                    self.probleme = "PresentMon : " + ligne.strip()[:120]
+                continue
+            if len(morceaux) <= max(i_app, i_pid):
+                continue
+            try:
+                pid = int(morceaux[i_pid])
+            except ValueError:
+                continue
+            with self.verrou:
+                self.compte[pid] = self.compte.get(pid, 0) + 1
+                self.noms[pid] = morceaux[i_app].lower()
+        self.probleme = "PresentMon s'est arrêté (droits administrateur ?)"
+
+    def fps(self):
+        """FPS de la dernière seconde pour le jeu au premier plan (ou -1)."""
+        with self.verrou:
+            compte, self.compte = self.compte, {}
+            noms = dict(self.noms)
+        if not compte:
+            return -1
+        cible = pid_premier_plan()
+        if cible in compte and noms.get(cible) not in PAS_DES_JEUX:
+            return compte[cible]
+        candidats = [(n, p) for p, n in compte.items() if noms.get(p) not in PAS_DES_JEUX]
+        return max(candidats)[0] if candidats else -1
+
+
+def est_admin():
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+
 class _XGamepad(ctypes.Structure):
     _fields_ = [("wButtons", ctypes.c_ushort), ("bLeftTrigger", ctypes.c_ubyte),
                 ("bRightTrigger", ctypes.c_ubyte), ("sThumbLX", ctypes.c_short),
@@ -370,7 +522,10 @@ class Agent:
         self.actif = True
         self.dernier_stat = ""
         self.dernier_gpu = ""
+        self.dernier_perf = ""
         self.precedent = {}
+        self.lhm = LecteurLHM()
+        self.fps = CompteurFPS()
 
     def boucle_mesures(self):
         if comtypes is not None:
@@ -381,7 +536,17 @@ class Agent:
             except Exception as e:
                 print(f"[agent] NVIDIA indisponible : {e}")
         psutil.cpu_percent(interval=None)
+        if not est_admin():
+            print("[agent] pas lancé en administrateur : les FPS ne seront pas disponibles")
+        if not self.fps.demarrer():
+            print(f"[agent] {self.fps.probleme}")
         while self.actif:
+            if FICHIER_PAUSE.exists():
+                if self.liaison.ser is not None:
+                    self.liaison.fermer()
+                    print("[agent] pause : port COM libéré")
+                time.sleep(1)
+                continue
             if self.liaison.ser is None:
                 if not self.liaison.connecter():
                     time.sleep(3)
@@ -396,6 +561,11 @@ class Agent:
             t, u, mem = gpu()
             self.dernier_gpu = f"GPU {t} {u} {mem}"
             self.liaison.envoyer(self.dernier_gpu)
+
+            en_jeu = self.precedent.get("JEU", "-") != "-"
+            fps = self.fps.fps() if en_jeu else -1
+            self.dernier_perf = f"PERF {self.lhm.temperature_cpu()} {fps}"
+            self.liaison.envoyer(self.dernier_perf)
 
             nom, externe = sortie_audio()
             etats = {
@@ -432,7 +602,10 @@ class Agent:
             if ligne.lower() == "q":
                 break
             if ligne.upper() == "ETAT":
-                print(self.dernier_stat, self.dernier_gpu, self.precedent)
+                print(self.dernier_stat, self.dernier_gpu, self.dernier_perf, self.precedent)
+                print("LibreHardwareMonitor :", self.lhm.probleme or "OK",
+                      "| PresentMon :", self.fps.probleme or "OK",
+                      "| administrateur :", "oui" if est_admin() else "non")
                 continue
             if ligne.upper() == "AUDIO":
                 if comtypes is not None:
@@ -452,11 +625,22 @@ def main():
         sys.exit("Ce programme est fait pour Windows.")
     parser = argparse.ArgumentParser(description="Agent PC de la Télécommande ESP32")
     parser.add_argument("--port", help="port série de l'ESP32 (sinon trouvé tout seul)")
+    parser.add_argument("--service", action="store_true",
+                        help="sans console : tourne en fond, écrit dans agent.log")
     args = parser.parse_args()
+
+    if args.service:
+        journal = open(FICHIER_LOG, "a", encoding="utf-8", buffering=1)
+        sys.stdout = journal
+        sys.stderr = journal
+        print(f"--- démarrage {time.strftime('%Y-%m-%d %H:%M:%S')} ---")
 
     agent = Agent(Liaison(args.port))
     threading.Thread(target=agent.boucle_mesures, daemon=True).start()
     threading.Thread(target=agent.boucle_lecture, daemon=True).start()
+    if args.service:
+        while True:
+            time.sleep(3600)
     agent.console()
 
 

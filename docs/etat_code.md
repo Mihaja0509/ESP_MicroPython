@@ -1,6 +1,6 @@
 # État du code — Micro
 
-Mis à jour : 2026-11-01 (fin de Phase 2-bis : casque, jeu Steam et GPU ; inclut la Phase 2, agent PC)
+Mis à jour : 2026-11-01 (fin de Phase 3 : température CPU, FPS et démarrage automatique)
 
 ## Arborescence
 
@@ -70,7 +70,8 @@ Micro/
 │   ├── micro_phase0.md
 │   ├── micro_phase1_clavier.md
 │   ├── micro_phase2_agent.md
-│   └── micro_phase2_bis.md
+│   ├── micro_phase2_bis.md
+│   └── micro_phase3_gamer.md
 ├── esp/
 │   ├── lib/
 │   │   ├── hid_pc.py
@@ -79,13 +80,17 @@ Micro/
 ├── tools/
 │   ├── agent/
 │   │   ├── agent_pc.py
-│   │   └── apps.json
+│   │   ├── apps.json
+│   │   └── installer_demarrage.ps1
 │   └── pc_test.py
 ├── .gitignore
 └── CLAUDE.md
 ```
 
-`bin/` (ignoré par Git) contient `ESP32_GENERIC_S3-SPIRAM_OCT-20260824-v1.29.0.bin`.
+Ignorés par Git :
+- `bin/` : `ESP32_GENERIC_S3-SPIRAM_OCT-20260824-v1.29.0.bin` ;
+- `tools/agent/bin/` (règle `bin/`) : `PresentMon-2.6.0-x64.exe`, `LibreHardwareMonitor/` (43 fichiers) ;
+- `tools/agent/PAUSE`, `tools/agent/agent.log`.
 
 ## Versions
 
@@ -107,6 +112,8 @@ Dépendances PC de l'agent (`pip install --user`) :
 | comtypes | 1.4.17 |
 | screen-brightness-control | 0.27.2 |
 | nvidia-ml-py (module `pynvml`) | 13.615.71 |
+| PresentMon (console, `tools/agent/bin`) | 2.6.0 (signé Intel Corporation) |
+| LibreHardwareMonitor (`tools/agent/bin/LibreHardwareMonitor`) | 0.9.6 (exe 0.9.6.0) |
 
 ## Port série
 
@@ -120,7 +127,7 @@ Dépendances PC de l'agent (`pip install --user`) :
 ls :/
          139 boot.py
            0 lib/
-        4624 main.py
+        4981 main.py
 ls :/lib
         6040 hid_pc.py
         4071 lcd.py
@@ -131,7 +138,7 @@ ls :/lib/usb/device
         1569 hid.mpy
 ```
 
-Vérification (Phase 2-bis, étape 4) : `py -m mpremote connect COM4 fs cat :main.py` contient bien `    if cmd == "GPU":`.
+Vérification (Phase 3, étape 7) : `py -m mpremote connect COM4 fs cat :main.py` contient bien `    if cmd == "PERF":`.
 
 ## Installation de usb-device-hid (Phase 1, étape 4)
 
@@ -227,6 +234,65 @@ Traceback (most recent call last):
 serial.serialutil.SerialException: ClearCommError failed (PermissionError(13, 'The device does not recognize the command.', None, 22))
 ```
 
+## Téléchargements (Phase 3, étape 4)
+
+Dernières versions stables (API GitHub `releases/latest`, `prerelease: false`) :
+
+| Outil | Release | Fichier téléchargé | Emplacement |
+|---|---|---|---|
+| PresentMon (console) | v2.6.0 (2026-09-21) | `PresentMon-2.6.0-x64.exe` (980 320 octets, signature Authenticode valide : Intel Corporation) | `tools\agent\bin\PresentMon-2.6.0-x64.exe` |
+| LibreHardwareMonitor | v0.9.6 (2026-02-14) | `LibreHardwareMonitor.zip` (6 632 626 octets), version .NET Framework | extrait dans `tools\agent\bin\LibreHardwareMonitor\` (43 fichiers, `LibreHardwareMonitor.exe` 0.9.6.0) |
+
+Non retenus : `PresentMon-2.6.0.msi` (application avec overlay), `LibreHardwareMonitor.NET.10.zip` (demande le runtime .NET 10).
+LibreHardwareMonitor n'a pas été lancé ; la tâche planifiée n'a pas été créée (par Mihaja, en administrateur).
+
+## Aide PresentMon (Phase 3, étape 5)
+
+`& tools\agent\bin\PresentMon-2.6.0-x64.exe --help` (86 lignes, code de sortie 1 ; 1re ligne : `PresentMon 2.6.0`). Lignes demandées :
+
+```
+  --output_stdout               Write CSV output to STDOUT.
+  --v1_metrics                  Output a CSV using PresentMon 1.x metrics.
+  --session_name name           Use the specified session name instead of the
+  --stop_existing_session       If a trace session with the same name is already
+```
+
+Aussi présente (utilisée par l'agent) :
+
+```
+  --no_console_stats            Do not display active swap chains and frame
+```
+
+## Copie sur la carte (Phase 3, étape 7)
+
+| Essai | Commande | Résultat |
+|---|---|---|
+| 1 | `fs cp esp\main.py :main.py + reset` | échec : `ClearCommError` (trace ci-dessous) |
+| 2 (relance immédiate) | idem | échec : `mpremote: failed to access COM4 (it may be in use by another program)` (aucun processus ne tenait COM4 : port pas encore libéré) |
+| 3 (après 3 s) | idem | réussi (`cp esp\main.py :main.py`) |
+| `fs cat :main.py` essai 1 | — | échec : `ClearCommError` |
+| `fs cat :main.py` essai 2 (après 3 s) | — | réussi, contient `if cmd == "PERF":` ; puis `reset` |
+
+Trace de l'essai 1 : seules les 2 dernières lignes ont été capturées (la sortie était filtrée). Elles sont identiques à la fin de la trace complète notée en Phase 2-bis (section « Trace mpremote ») :
+
+```
+    raise SerialException("ClearCommError failed ({!r})".format(ctypes.WinError()))
+serial.serialutil.SerialException: ClearCommError failed (PermissionError(13, 'The device does not recognize the command.', None, 22))
+```
+
+`fs cat` essai 1 (dernière ligne seulement, capturée de la même façon) :
+
+```
+serial.serialutil.SerialException: ClearCommError failed (PermissionError(13, 'The device does not recognize the command.', None, 22))
+```
+
+## Réponse de la carte (Phase 3, étape 8)
+
+```
+> py -X utf8 tools\pc_test.py COM4 --cmd "PERF 70 144"
+  -> OK
+```
+
 ## esp/main.py
 
 ```python
@@ -248,6 +314,7 @@ nb = 0
 stat = {"cpu": -1, "ram": -1, "vol": -1, "bat": -1, "chg": 0}
 evt = {"casque": "", "manette": 0, "verrou": 0, "jeu": ""}
 gpu = {"temp": -1, "charge": -1, "vram": -1}
+perf = {"cpu_temp": -1, "fps": -1}
 
 
 def dessiner():
@@ -258,8 +325,9 @@ def dessiner():
     ecran.texte("USB : " + etat_usb, 10, 40, couleur_usb, 2)
     if evt["jeu"]:
         ecran.texte("JEU : " + evt["jeu"][:34], 10, 64, lcd.VERT, 1)
-    ecran.texte("GPU %d C  %d%%  VRAM %d%%" % (gpu["temp"], gpu["charge"], gpu["vram"]),
-                10, 78, lcd.GRIS, 1)
+    ecran.texte("GPU %dC %d%%  CPU %dC  FPS %d" % (gpu["temp"], gpu["charge"],
+                                                   perf["cpu_temp"], perf["fps"]),
+                10, 78, lcd.VERT if evt["jeu"] else lcd.GRIS, 1)
     ecran.texte(derniere[:19], 10, 92, lcd.BLANC, 2)
     ecran.texte("CPU %d%%  RAM %d%%  Vol %d%%" % (stat["cpu"], stat["ram"], stat["vol"]),
                 10, 118, lcd.ORANGE, 1)
@@ -308,6 +376,12 @@ def executer(ligne):
             stat["cpu"], stat["ram"], stat["vol"], stat["bat"], stat["chg"] = v[:5]
         except ValueError:
             return "ERR utilise : STAT cpu ram vol bat charge"
+        return "OK"
+    if cmd == "PERF":
+        try:
+            perf["cpu_temp"], perf["fps"] = [int(x) for x in arg.split()][:2]
+        except ValueError:
+            return "ERR utilise : PERF temp_cpu fps"
         return "OK"
     if cmd == "GPU":
         try:
@@ -367,7 +441,7 @@ while True:
     if ligne:
         reponse = executer(ligne.strip())
         print(reponse)
-        if not ligne.startswith(("STAT", "EVT", "GPU")):
+        if not ligne.startswith(("STAT", "EVT", "GPU", "PERF")):
             nb += 1
             derniere = ligne.strip()
         if pc.is_open():
@@ -386,20 +460,28 @@ while True:
 - Envoie chaque seconde la carte graphique NVIDIA : température, charge, mémoire (ligne « GPU »).
 - Surveille et signale : sortie audio (casque ou haut-parleurs), manette, PC verrouillé,
   jeu Steam en cours (lignes « EVT »).
+- Mode gamer : température du processeur (LibreHardwareMonitor) et FPS du jeu (PresentMon),
+  ligne « PERF » chaque seconde.
 - Exécute les commandes « PC » : ouvrir une app, luminosité, verrouiller, écran éteint,
   veille, arrêt. Les autres commandes (KEY, TEXT, VOL+, MOUSE…) sont transmises à l'ESP32.
 
 Utilisation (dans le dossier Micro) :
-  py -X utf8 tools\\agent\\agent_pc.py            port trouvé tout seul
+  py -X utf8 tools\\agent\\agent_pc.py            port trouvé tout seul, avec console
   py -X utf8 tools\\agent\\agent_pc.py --port COM4
+  pythonw tools\\agent\\agent_pc.py --service   sans console (démarrage automatique)
+Pour libérer le port COM (mise à jour de la carte), crée le fichier tools\\agent\\PAUSE ;
+supprime-le pour que l'agent se reconnecte.
 """
 import argparse
+import atexit
 import ctypes
+import glob
 import json
 import subprocess
 import sys
 import threading
 import time
+import urllib.request
 from pathlib import Path
 
 import psutil
@@ -427,6 +509,12 @@ import winreg
 
 DOSSIER = Path(__file__).resolve().parent
 FICHIER_APPS = DOSSIER / "apps.json"
+FICHIER_PAUSE = DOSSIER / "PAUSE"
+FICHIER_LOG = DOSSIER / "agent.log"
+URL_LHM = "http://localhost:8085/data.json"
+# Processus jamais considérés comme des jeux pour le calcul des FPS
+PAS_DES_JEUX = {"dwm.exe", "explorer.exe", "steamwebhelper.exe", "steam.exe",
+                "chrome.exe", "msedge.exe", "code.exe", "<unknown>"}
 APPS_DEFAUT = {
     "spotify": "spotify:",
     "youtube": "https://www.youtube.com",
@@ -481,6 +569,15 @@ class Liaison:
             print(f"[agent] impossible d'ouvrir {port} : {e}")
             self.ser = None
             return False
+
+    def fermer(self):
+        with self.verrou:
+            if self.ser is not None:
+                try:
+                    self.ser.close()
+                except serial.SerialException:
+                    pass
+                self.ser = None
 
     def envoyer(self, ligne):
         with self.verrou:
@@ -625,6 +722,135 @@ def jeu_steam():
     return f"Jeu Steam {appid}"
 
 
+class LecteurLHM:
+    """Température du processeur lue dans le serveur web de LibreHardwareMonitor."""
+
+    def __init__(self):
+        self.reessayer_a = 0.0
+        self.probleme = ""
+
+    def temperature_cpu(self):
+        if time.time() < self.reessayer_a:
+            return -1
+        try:
+            with urllib.request.urlopen(URL_LHM, timeout=0.5) as r:
+                arbre = json.loads(r.read().decode("utf-8", errors="ignore"))
+        except Exception as e:
+            self.probleme = f"LibreHardwareMonitor injoignable ({e.__class__.__name__})"
+            self.reessayer_a = time.time() + 10
+            return -1
+        self.probleme = ""
+        valeurs = {}
+        self._parcourir(arbre, "", valeurs)
+        for nom in ("CPU Package", "Core Max", "Core Average", "Core (Tctl/Tdie)"):
+            if nom in valeurs:
+                return round(valeurs[nom])
+        return -1
+
+    def _parcourir(self, noeud, parent, valeurs):
+        texte = str(noeud.get("Text", ""))
+        identifiant = str(noeud.get("SensorId", ""))
+        est_cpu = "cpu" in identifiant.lower() or not identifiant
+        if parent == "Temperatures" and not noeud.get("Children") and est_cpu:
+            v = noeud.get("RawValue")
+            if not isinstance(v, (int, float)):
+                brut = str(noeud.get("Value", "")).split(" ")[0].replace(",", ".")
+                try:
+                    v = float(brut)
+                except ValueError:
+                    v = None
+            if v is not None and texte not in valeurs:
+                valeurs[texte] = float(v)
+        for enfant in noeud.get("Children", []) or []:
+            self._parcourir(enfant, texte, valeurs)
+
+
+def pid_premier_plan():
+    u = ctypes.windll.user32
+    pid = ctypes.c_ulong(0)
+    u.GetWindowThreadProcessId(u.GetForegroundWindow(), ctypes.byref(pid))
+    return pid.value
+
+
+class CompteurFPS:
+    """Lance PresentMon et compte les images affichées par seconde, par processus."""
+
+    def __init__(self):
+        self.proc = None
+        self.compte = {}      # pid -> images depuis la dernière lecture
+        self.noms = {}        # pid -> nom de l'exe
+        self.verrou = threading.Lock()
+        self.probleme = ""
+
+    def exe(self):
+        trouves = sorted(glob.glob(str(DOSSIER / "bin" / "PresentMon*.exe")))
+        return trouves[-1] if trouves else None
+
+    def demarrer(self):
+        chemin = self.exe()
+        if chemin is None:
+            self.probleme = "PresentMon absent de tools\\agent\\bin"
+            return False
+        cmd = [chemin, "--output_stdout", "--no_console_stats", "--v1_metrics",
+               "--stop_existing_session", "--session_name", "ESP32Telecommande"]
+        try:
+            self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                         text=True, encoding="utf-8", errors="ignore",
+                                         creationflags=0x08000000)  # pas de fenêtre
+        except OSError as e:
+            self.probleme = f"PresentMon ne démarre pas : {e}"
+            return False
+        atexit.register(self.arreter)
+        threading.Thread(target=self._lire, daemon=True).start()
+        return True
+
+    def arreter(self):
+        if self.proc is not None and self.proc.poll() is None:
+            self.proc.terminate()
+
+    def _lire(self):
+        i_app = i_pid = None
+        for ligne in self.proc.stdout:
+            morceaux = ligne.strip().split(",")
+            if i_pid is None:
+                if "ProcessID" in morceaux and "Application" in morceaux:
+                    i_app = morceaux.index("Application")
+                    i_pid = morceaux.index("ProcessID")
+                else:
+                    self.probleme = "PresentMon : " + ligne.strip()[:120]
+                continue
+            if len(morceaux) <= max(i_app, i_pid):
+                continue
+            try:
+                pid = int(morceaux[i_pid])
+            except ValueError:
+                continue
+            with self.verrou:
+                self.compte[pid] = self.compte.get(pid, 0) + 1
+                self.noms[pid] = morceaux[i_app].lower()
+        self.probleme = "PresentMon s'est arrêté (droits administrateur ?)"
+
+    def fps(self):
+        """FPS de la dernière seconde pour le jeu au premier plan (ou -1)."""
+        with self.verrou:
+            compte, self.compte = self.compte, {}
+            noms = dict(self.noms)
+        if not compte:
+            return -1
+        cible = pid_premier_plan()
+        if cible in compte and noms.get(cible) not in PAS_DES_JEUX:
+            return compte[cible]
+        candidats = [(n, p) for p, n in compte.items() if noms.get(p) not in PAS_DES_JEUX]
+        return max(candidats)[0] if candidats else -1
+
+
+def est_admin():
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+
 class _XGamepad(ctypes.Structure):
     _fields_ = [("wButtons", ctypes.c_ushort), ("bLeftTrigger", ctypes.c_ubyte),
                 ("bRightTrigger", ctypes.c_ubyte), ("sThumbLX", ctypes.c_short),
@@ -751,7 +977,10 @@ class Agent:
         self.actif = True
         self.dernier_stat = ""
         self.dernier_gpu = ""
+        self.dernier_perf = ""
         self.precedent = {}
+        self.lhm = LecteurLHM()
+        self.fps = CompteurFPS()
 
     def boucle_mesures(self):
         if comtypes is not None:
@@ -762,7 +991,17 @@ class Agent:
             except Exception as e:
                 print(f"[agent] NVIDIA indisponible : {e}")
         psutil.cpu_percent(interval=None)
+        if not est_admin():
+            print("[agent] pas lancé en administrateur : les FPS ne seront pas disponibles")
+        if not self.fps.demarrer():
+            print(f"[agent] {self.fps.probleme}")
         while self.actif:
+            if FICHIER_PAUSE.exists():
+                if self.liaison.ser is not None:
+                    self.liaison.fermer()
+                    print("[agent] pause : port COM libéré")
+                time.sleep(1)
+                continue
             if self.liaison.ser is None:
                 if not self.liaison.connecter():
                     time.sleep(3)
@@ -777,6 +1016,11 @@ class Agent:
             t, u, mem = gpu()
             self.dernier_gpu = f"GPU {t} {u} {mem}"
             self.liaison.envoyer(self.dernier_gpu)
+
+            en_jeu = self.precedent.get("JEU", "-") != "-"
+            fps = self.fps.fps() if en_jeu else -1
+            self.dernier_perf = f"PERF {self.lhm.temperature_cpu()} {fps}"
+            self.liaison.envoyer(self.dernier_perf)
 
             nom, externe = sortie_audio()
             etats = {
@@ -813,7 +1057,10 @@ class Agent:
             if ligne.lower() == "q":
                 break
             if ligne.upper() == "ETAT":
-                print(self.dernier_stat, self.dernier_gpu, self.precedent)
+                print(self.dernier_stat, self.dernier_gpu, self.dernier_perf, self.precedent)
+                print("LibreHardwareMonitor :", self.lhm.probleme or "OK",
+                      "| PresentMon :", self.fps.probleme or "OK",
+                      "| administrateur :", "oui" if est_admin() else "non")
                 continue
             if ligne.upper() == "AUDIO":
                 if comtypes is not None:
@@ -833,16 +1080,52 @@ def main():
         sys.exit("Ce programme est fait pour Windows.")
     parser = argparse.ArgumentParser(description="Agent PC de la Télécommande ESP32")
     parser.add_argument("--port", help="port série de l'ESP32 (sinon trouvé tout seul)")
+    parser.add_argument("--service", action="store_true",
+                        help="sans console : tourne en fond, écrit dans agent.log")
     args = parser.parse_args()
+
+    if args.service:
+        journal = open(FICHIER_LOG, "a", encoding="utf-8", buffering=1)
+        sys.stdout = journal
+        sys.stderr = journal
+        print(f"--- démarrage {time.strftime('%Y-%m-%d %H:%M:%S')} ---")
 
     agent = Agent(Liaison(args.port))
     threading.Thread(target=agent.boucle_mesures, daemon=True).start()
     threading.Thread(target=agent.boucle_lecture, daemon=True).start()
+    if args.service:
+        while True:
+            time.sleep(3600)
     agent.console()
 
 
 if __name__ == "__main__":
     main()
+```
+
+## tools/agent/installer_demarrage.ps1
+
+```powershell
+# Démarrage automatique de l'agent de la Télécommande ESP32 (avec droits administrateur).
+# À lancer UNE SEULE FOIS dans un PowerShell ouvert « en tant qu'administrateur » :
+#   powershell -ExecutionPolicy Bypass -File tools\agent\installer_demarrage.ps1
+# Pour supprimer : Unregister-ScheduledTask -TaskName "ESP32 Telecommande Agent" -Confirm:$false
+
+$python = & py -c "import sys; print(sys.executable)"
+$pythonw = Join-Path (Split-Path $python) "pythonw.exe"
+$agent = Join-Path $PSScriptRoot "agent_pc.py"
+
+$action = New-ScheduledTaskAction -Execute $pythonw -Argument "`"$agent`" --service" -WorkingDirectory $PSScriptRoot
+$declencheur = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+$compte = New-ScheduledTaskPrincipal -UserId $env:USERNAME -RunLevel Highest -LogonType Interactive
+$reglages = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
+
+Register-ScheduledTask -TaskName "ESP32 Telecommande Agent" -Action $action -Trigger $declencheur `
+    -Principal $compte -Settings $reglages -Force | Out-Null
+
+Write-Host "Tâche « ESP32 Telecommande Agent » créée (pythonw : $pythonw)."
+Write-Host "Elle démarrera à chaque ouverture de session. Pour la lancer tout de suite :"
+Write-Host "  Start-ScheduledTask -TaskName 'ESP32 Telecommande Agent'"
 ```
 
 ## esp/lib/hid_pc.py (inchangé depuis la Phase 1)

@@ -16,6 +16,7 @@ nb = 0
 stat = {"cpu": -1, "ram": -1, "vol": -1, "bat": -1, "chg": 0}
 evt = {"casque": "", "manette": 0, "verrou": 0, "jeu": ""}
 gpu = {"temp": -1, "charge": -1, "vram": -1}
+perf = {"cpu_temp": -1, "fps": -1}
 
 
 def dessiner():
@@ -26,8 +27,9 @@ def dessiner():
     ecran.texte("USB : " + etat_usb, 10, 40, couleur_usb, 2)
     if evt["jeu"]:
         ecran.texte("JEU : " + evt["jeu"][:34], 10, 64, lcd.VERT, 1)
-    ecran.texte("GPU %d C  %d%%  VRAM %d%%" % (gpu["temp"], gpu["charge"], gpu["vram"]),
-                10, 78, lcd.GRIS, 1)
+    ecran.texte("GPU %dC %d%%  CPU %dC  FPS %d" % (gpu["temp"], gpu["charge"],
+                                                   perf["cpu_temp"], perf["fps"]),
+                10, 78, lcd.VERT if evt["jeu"] else lcd.GRIS, 1)
     ecran.texte(derniere[:19], 10, 92, lcd.BLANC, 2)
     ecran.texte("CPU %d%%  RAM %d%%  Vol %d%%" % (stat["cpu"], stat["ram"], stat["vol"]),
                 10, 118, lcd.ORANGE, 1)
@@ -76,6 +78,12 @@ def executer(ligne):
             stat["cpu"], stat["ram"], stat["vol"], stat["bat"], stat["chg"] = v[:5]
         except ValueError:
             return "ERR utilise : STAT cpu ram vol bat charge"
+        return "OK"
+    if cmd == "PERF":
+        try:
+            perf["cpu_temp"], perf["fps"] = [int(x) for x in arg.split()][:2]
+        except ValueError:
+            return "ERR utilise : PERF temp_cpu fps"
         return "OK"
     if cmd == "GPU":
         try:
@@ -135,7 +143,7 @@ while True:
     if ligne:
         reponse = executer(ligne.strip())
         print(reponse)
-        if not ligne.startswith(("STAT", "EVT", "GPU")):
+        if not ligne.startswith(("STAT", "EVT", "GPU", "PERF")):
             nb += 1
             derniere = ligne.strip()
         if pc.is_open():

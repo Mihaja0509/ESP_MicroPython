@@ -6,3 +6,7 @@ esp/secrets.py
 
 # Python
 __pycache__/
+
+# Agent PC
+tools/agent/PAUSE
+tools/agent/agent.log
