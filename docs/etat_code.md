@@ -1,6 +1,6 @@
 # État du code — Micro
 
-Mis à jour : 2026-11-01 (fin de Phase 0)
+Mis à jour : 2026-11-01 (fin de Phase 1 : clavier, souris et multimédia USB)
 
 ## Arborescence
 
@@ -65,11 +65,16 @@ Micro/
 ├── docs/
 │   ├── etat_code.md
 │   ├── etat_du_projet.md
-│   └── micro_phase0.md
+│   ├── etat_micro.md
+│   ├── micro_phase0.md
+│   └── micro_phase1_clavier.md
 ├── esp/
 │   ├── lib/
+│   │   ├── hid_pc.py
 │   │   └── lcd.py
 │   └── main.py
+├── tools/
+│   └── pc_test.py
 ├── .gitignore
 └── CLAUDE.md
 ```
@@ -83,113 +88,347 @@ Micro/
 | esptool | 5.6.0 |
 | mpremote | 1.29.0 |
 | MicroPython sur la carte | v1.29.0 (2026-08-24), ESP32_GENERIC_S3-SPIRAM_OCT |
+| usb-device-hid (mip, sur la carte) | 0.2.0 (fichiers `.mpy`) |
 | Flutter | 3.47.2 (stable), Dart 3.13.2 |
 
 ## Port série
 
-- Avant le flash (programme C++ / bootloader) : COM3 (USB 303a:1001).
-- Après le flash MicroPython : **COM4** (USB 303a:4001). Retrouver le port avec `py -m mpremote devs`.
-
-## REPL (étape 4)
-
-Commande : `py -m mpremote connect COM4 exec "import sys, gc; print(sys.implementation); print(gc.mem_free())"`
-
-```
-(name='micropython', version=(1, 29, 0, ''), _machine='Generic ESP32S3 module with Octal-SPIRAM with ESP32-S3', _mpy=11014, _build='ESP32_GENERIC_S3-SPIRAM_OCT', _thread='GIL')
-8320064
-```
-
-PSRAM utilisée : 8 320 064 octets libres (> 1 000 000).
+- **COM4** (USB 303a:4001), avant et après le reset de la Phase 1 (`py -m mpremote devs`).
+- Pendant le flash de la Phase 0 (bootloader) : COM3 (303a:1001).
 
 ## Fichiers sur la carte
 
 ```
-ls :
+ls :/
          139 boot.py
            0 lib/
-        1632 main.py
-ls :lib
+        2690 main.py
+ls :/lib
+        6040 hid_pc.py
         4071 lcd.py
+           0 usb/
+ls :/lib/usb
+           0 device/
+ls :/lib/usb/device
+          97 __init__.mpy
+        4411 core.mpy
+        1569 hid.mpy
 ```
 
-## Console après reset
-
-`py -m mpremote connect COM4 reset`, puis lecture de COM4 à 115200 pendant 5 s : **aucune sortie** (main.py n'affiche rien ; aucune erreur).
-
-Vérification complémentaire : Ctrl-C envoyé ensuite → le programme était bien dans la boucle :
+## Installation de usb-device-hid (Phase 1, étape 4)
 
 ```
-Traceback (most recent call last):
-  File "main.py", line 55, in <module>
-KeyboardInterrupt: 
-MicroPython v1.29.0 on 2026-08-24; Generic ESP32S3 module with Octal-SPIRAM with ESP32-S3
-Type "help()" for more information.
->>> 
+Install usb-device-hid
+Installing usb-device-hid (latest) from https://micropython.org/pi/v2 to /lib
+Installing: /lib/usb/device/__init__.mpy
+Installing: /lib/usb/device/core.mpy
+Installing: /lib/usb/device/hid.mpy
+Done
 ```
 
-puis Ctrl-D (`MPY: soft reboot`) : la démo a redémarré.
+## Réponses de la carte (Phase 1, étape 6)
+
+```
+> py -X utf8 tools\pc_test.py COM4 --cmd PING
+  -> PONG
+> py -X utf8 tools\pc_test.py COM4 --cmd "VOL+"
+  -> OK
+```
+
+## Périphériques Windows 303A (Phase 1, étape 7)
+
+`Get-PnpDevice -PresentOnly -Class Keyboard,Mouse,HIDClass`, lignes contenant 303A :
+
+```
+Status Class    FriendlyName                          InstanceId
+------ -----    ------------                          ----------
+OK     Keyboard HID Keyboard Device                   HID\VID_303A&PID_4001&MI_02&COL01\7&24098D10&0&0000
+OK     Mouse    HID-compliant mouse                   HID\VID_303A&PID_4001&MI_02&COL02\7&24098D10&0&0001
+OK     HIDClass HID-compliant consumer control device HID\VID_303A&PID_4001&MI_02&COL03\7&24098D10&0&0002
+OK     HIDClass USB Input Device                      USB\VID_303A&PID_4001&MI_02\6&32EC6B02&0&0002
+```
 
 ## esp/main.py
 
 ```python
-# Démo Phase 0 : écran, LED RGB et bouton BOOT.
-import gc
+# Phase 1 : l'ESP32 devient clavier + souris + multimédia du PC.
+# Les ordres arrivent par le port série USB, une ligne par commande.
+import select
+import sys
 import time
 
-from machine import Pin
-from neopixel import NeoPixel
-
 import lcd
+from hid_pc import MEDIA, PC
 
 ecran = lcd.Ecran(paysage=True)
-led = NeoPixel(Pin(38), 1)
-bouton = Pin(0, Pin.IN, Pin.PULL_UP)
+pc = PC()
+etat_usb = "connexion..."
+derniere = "-"
+nb = 0
 
-COULEURS_LED = [(40, 0, 0), (0, 40, 0), (0, 0, 40), (30, 20, 0), (0, 0, 0)]
-NIVEAUX = [20, 50, 80, 100]
 
-niveau = 2
-depart = time.ticks_ms()
-dernier_appui = 0
-i = 0
-
-while True:
-    # Bouton BOOT : luminosité suivante
-    if bouton.value() == 0 and time.ticks_diff(time.ticks_ms(), dernier_appui) > 400:
-        dernier_appui = time.ticks_ms()
-        niveau = (niveau + 1) % len(NIVEAUX)
-        ecran.luminosite(NIVEAUX[niveau])
-
-    secondes = time.ticks_diff(time.ticks_ms(), depart) // 1000
-    gc.collect()
-
+def dessiner():
     f = ecran.fb
     f.fill(lcd.NOIR)
-    ecran.texte("ESP32 Maison", 10, 8, lcd.CYAN, 3)
-    f.fill_rect(10, 44, 96, 30, lcd.ROUGE)
-    f.fill_rect(112, 44, 96, 30, lcd.VERT)
-    f.fill_rect(214, 44, 96, 30, lcd.BLEU)
-    ecran.texte("R", 52, 51, lcd.BLANC, 2)
-    ecran.texte("V", 154, 51, lcd.NOIR, 2)
-    ecran.texte("B", 256, 51, lcd.BLANC, 2)
-    ecran.texte("Depuis %d s" % secondes, 10, 90, lcd.BLANC, 2)
-    ecran.texte("RAM libre : %d Ko" % (gc.mem_free() // 1024), 10, 120, lcd.ORANGE, 1)
-    ecran.texte("Luminosite : %d %%" % NIVEAUX[niveau], 10, 135, lcd.ORANGE, 1)
-    ecran.texte("BOOT = luminosite", 10, 155, lcd.GRIS, 1)
+    ecran.texte("Telecommande PC", 10, 8, lcd.CYAN, 2)
+    couleur_usb = lcd.VERT if etat_usb == "pret" else lcd.ORANGE
+    ecran.texte("USB : " + etat_usb, 10, 40, couleur_usb, 2)
+    ecran.texte("Derniere commande :", 10, 76, lcd.GRIS, 1)
+    ecran.texte(derniere[:19], 10, 92, lcd.BLANC, 2)
+    ecran.texte("Commandes : %d" % nb, 10, 130, lcd.ORANGE, 1)
+    ecran.texte("tools/pc_test.py sur le PC", 10, 150, lcd.GRIS, 1)
     ecran.afficher()
 
-    led[0] = COULEURS_LED[i % len(COULEURS_LED)]
-    led.write()
-    i += 1
 
-    # attend 1 s en surveillant le bouton
-    for _ in range(20):
-        if bouton.value() == 0:
-            break
-        time.sleep_ms(50)
+dessiner()
+etat_usb = "pret" if pc.demarrer() else "pas reconnu"
+dessiner()
+
+entree = select.poll()
+entree.register(sys.stdin, select.POLLIN)
+tampon = ""
+
+
+def lire_ligne():
+    """Renvoie une ligne complète reçue sur le port série, ou None."""
+    global tampon
+    while entree.poll(0):
+        c = sys.stdin.read(1)
+        if c in ("\n", "\r"):
+            if tampon:
+                ligne = tampon
+                tampon = ""
+                return ligne
+        else:
+            tampon += c
+    return None
+
+
+def executer(ligne):
+    mots = ligne.split(" ", 1)
+    cmd = mots[0].upper()
+    arg = mots[1] if len(mots) > 1 else ""
+    if cmd == "PING":
+        return "PONG"
+    if etat_usb != "pret" and not pc.is_open():
+        return "ERR USB pas reconnu par le PC"
+    if cmd == "KEY":
+        return "OK" if pc.raccourci(arg) else "ERR touche inconnue : " + arg
+    if cmd == "TEXT":
+        ignores = pc.taper(arg)
+        return "OK" if ignores == 0 else "OK (%d caracteres ignores)" % ignores
+    if cmd in MEDIA:
+        pc.media(cmd)
+        return "OK"
+    if cmd == "MOUSE":
+        try:
+            dx, dy = [int(v) for v in arg.split()]
+        except ValueError:
+            return "ERR utilise : MOUSE dx dy"
+        pc.souris(dx, dy)
+        return "OK"
+    if cmd == "CLIC":
+        pc.clic(1)
+        return "OK"
+    if cmd == "CLICD":
+        pc.clic(2)
+        return "OK"
+    if cmd == "MOLETTE":
+        try:
+            pc.souris(molette=int(arg))
+        except ValueError:
+            return "ERR utilise : MOLETTE n"
+        return "OK"
+    return "ERR commande inconnue : " + cmd
+
+
+while True:
+    ligne = lire_ligne()
+    if ligne:
+        reponse = executer(ligne.strip())
+        print(reponse)
+        nb += 1
+        derniere = ligne.strip()
+        if pc.is_open():
+            etat_usb = "pret"
+        dessiner()
+    time.sleep_ms(10)
 ```
 
-## esp/lib/lcd.py
+## esp/lib/hid_pc.py
+
+```python
+# Clavier + souris + touches multimédia USB pour le PC.
+# Utilise la bibliothèque officielle micropython-lib « usb-device-hid ».
+import time
+
+import usb.device
+from usb.device.hid import HIDInterface
+
+# Description de l'appareil envoyée au PC :
+# rapport 1 = clavier, rapport 2 = souris, rapport 3 = multimédia.
+_DESCRIPTEUR = bytes((
+    # --- Clavier (rapport 1) ---
+    0x05, 0x01, 0x09, 0x06, 0xA1, 0x01, 0x85, 0x01,
+    0x05, 0x07, 0x19, 0xE0, 0x29, 0xE7, 0x15, 0x00, 0x25, 0x01,
+    0x75, 0x01, 0x95, 0x08, 0x81, 0x02,             # 8 touches de modification
+    0x95, 0x01, 0x75, 0x08, 0x81, 0x01,             # octet réservé
+    0x95, 0x06, 0x75, 0x08, 0x15, 0x00, 0x25, 0x65,
+    0x05, 0x07, 0x19, 0x00, 0x29, 0x65, 0x81, 0x00, # 6 touches
+    0xC0,
+    # --- Souris (rapport 2) ---
+    0x05, 0x01, 0x09, 0x02, 0xA1, 0x01, 0x85, 0x02,
+    0x09, 0x01, 0xA1, 0x00,
+    0x05, 0x09, 0x19, 0x01, 0x29, 0x03, 0x15, 0x00, 0x25, 0x01,
+    0x95, 0x03, 0x75, 0x01, 0x81, 0x02,             # 3 boutons
+    0x95, 0x01, 0x75, 0x05, 0x81, 0x01,             # bourrage
+    0x05, 0x01, 0x09, 0x30, 0x09, 0x31, 0x09, 0x38,
+    0x15, 0x81, 0x25, 0x7F, 0x75, 0x08, 0x95, 0x03, 0x81, 0x06,  # X, Y, molette
+    0xC0, 0xC0,
+    # --- Multimédia (rapport 3) ---
+    0x05, 0x0C, 0x09, 0x01, 0xA1, 0x01, 0x85, 0x03,
+    0x15, 0x00, 0x26, 0xFF, 0x03, 0x19, 0x00, 0x2A, 0xFF, 0x03,
+    0x75, 0x10, 0x95, 0x01, 0x81, 0x00,
+    0xC0,
+))
+
+# Touches de modification
+MODS = {"ctrl": 0x01, "shift": 0x02, "alt": 0x04, "win": 0x08}
+
+# Touches spéciales (codes USB HID)
+SPECIALES = {
+    "enter": 0x28, "entree": 0x28, "esc": 0x29, "echap": 0x29,
+    "backspace": 0x2A, "tab": 0x2B, "space": 0x2C, "espace": 0x2C,
+    "printscreen": 0x46, "home": 0x4A, "pageup": 0x4B, "delete": 0x4C,
+    "suppr": 0x4C, "end": 0x4D, "pagedown": 0x4E,
+    "right": 0x4F, "left": 0x50, "down": 0x51, "up": 0x52,
+}
+for _n in range(1, 13):
+    SPECIALES["f%d" % _n] = 0x3A + _n - 1
+
+# Touches multimédia (codes « Consumer »)
+MEDIA = {
+    "VOL+": 0xE9, "VOL-": 0xEA, "MUTE": 0xE2, "PLAY": 0xCD,
+    "NEXT": 0xB5, "PREV": 0xB6, "LUM+": 0x6F, "LUM-": 0x70,
+}
+
+# Caractères tapables (disposition QWERTY US) : caractère -> (shift, code)
+_SANS_SHIFT = "-=[]\\;'`,./"
+_CODES_SANS_SHIFT = (0x2D, 0x2E, 0x2F, 0x30, 0x31, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38)
+_AVEC_SHIFT = "_+{}|:\"~<>?"
+_CHIFFRES_SHIFT = "!@#$%^&*()"
+
+
+def _caractere(c):
+    if "a" <= c <= "z":
+        return False, 0x04 + ord(c) - ord("a")
+    if "A" <= c <= "Z":
+        return True, 0x04 + ord(c) - ord("A")
+    if "1" <= c <= "9":
+        return False, 0x1E + ord(c) - ord("1")
+    if c == "0":
+        return False, 0x27
+    if c == " ":
+        return False, 0x2C
+    if c in _SANS_SHIFT:
+        return False, _CODES_SANS_SHIFT[_SANS_SHIFT.index(c)]
+    if c in _AVEC_SHIFT:
+        return True, _CODES_SANS_SHIFT[_AVEC_SHIFT.index(c)]
+    if c in _CHIFFRES_SHIFT:
+        return True, 0x1E + _CHIFFRES_SHIFT.index(c)
+    return None
+
+
+class PC(HIDInterface):
+    def __init__(self):
+        super().__init__(_DESCRIPTEUR, interface_str="ESP32 Maison PC")
+
+    def demarrer(self, attente_ms=5000):
+        """Déclare clavier + souris au PC (le port série reste actif)."""
+        usb.device.get().init(self, builtin_driver=True)
+        debut = time.ticks_ms()
+        while not self.is_open():
+            if time.ticks_diff(time.ticks_ms(), debut) > attente_ms:
+                return False
+            time.sleep_ms(100)
+        return True
+
+    def _envoyer(self, rapport):
+        # Toujours un nouvel objet bytes : le tampon ne doit pas changer
+        # pendant que l'USB l'envoie.
+        for _ in range(20):
+            if self.send_report(bytes(rapport)):
+                return True
+            time.sleep_ms(5)
+        return False
+
+    # --- Clavier -------------------------------------------------------------
+    def _touches(self, mods, code):
+        self._envoyer((1, mods, 0, code, 0, 0, 0, 0, 0))
+        time.sleep_ms(15)
+        self._envoyer((1, 0, 0, 0, 0, 0, 0, 0, 0))
+        time.sleep_ms(15)
+
+    def raccourci(self, texte):
+        """Ex. 'win+l', 'ctrl+shift+esc', 'f5', 'a'. Renvoie False si inconnu."""
+        mods = 0
+        code = 0
+        for morceau in texte.lower().split("+"):
+            morceau = morceau.strip()
+            if morceau in MODS:
+                mods |= MODS[morceau]
+            elif morceau in SPECIALES:
+                code = SPECIALES[morceau]
+            elif len(morceau) == 1 and _caractere(morceau) is not None:
+                code = _caractere(morceau)[1]
+            else:
+                return False
+        self._touches(mods, code)
+        return True
+
+    def taper(self, texte):
+        """Tape un texte (QWERTY US). Renvoie le nombre de caractères ignorés."""
+        ignores = 0
+        for c in texte:
+            r = _caractere(c)
+            if r is None:
+                ignores += 1
+                continue
+            shift, code = r
+            self._touches(MODS["shift"] if shift else 0, code)
+        return ignores
+
+    # --- Multimédia ----------------------------------------------------------
+    def media(self, nom):
+        usage = MEDIA.get(nom)
+        if usage is None:
+            return False
+        self._envoyer((3, usage & 0xFF, usage >> 8))
+        time.sleep_ms(30)
+        self._envoyer((3, 0, 0))
+        return True
+
+    # --- Souris --------------------------------------------------------------
+    def souris(self, dx=0, dy=0, boutons=0, molette=0):
+        # Les grands déplacements sont découpés en pas de 127 au maximum.
+        while True:
+            px = max(-127, min(127, dx))
+            py = max(-127, min(127, dy))
+            self._envoyer((2, boutons, px & 0xFF, py & 0xFF, molette & 0xFF))
+            dx -= px
+            dy -= py
+            molette = 0
+            if dx == 0 and dy == 0:
+                break
+            time.sleep_ms(8)
+
+    def clic(self, bouton=1):
+        self.souris(boutons=bouton)
+        time.sleep_ms(20)
+        self.souris(boutons=0)
+```
+
+## esp/lib/lcd.py (inchangé depuis la Phase 0)
 
 ```python
 # Pilote minimal de l'écran ST7789 (Waveshare ESP32-S3-LCD-1.47, 172 x 320).
@@ -305,7 +544,84 @@ class Ecran:
             x += 8 * taille
 ```
 
-## app/pubspec.yaml
+## tools/pc_test.py
+
+```python
+#!/usr/bin/env python3
+"""Envoie des commandes de test à l'ESP32 (clavier / souris / multimédia).
+
+Utilisation :
+  py -X utf8 tools\\pc_test.py COM4                commandes tapées une par une
+  py -X utf8 tools\\pc_test.py COM4 --cmd "VOL+"   une seule commande
+"""
+import argparse
+import sys
+import time
+
+import serial
+
+AIDE = """Commandes :
+  PING                  test de connexion
+  KEY win+l             raccourci (ctrl, shift, alt, win + lettre, chiffre, f1..f12,
+                        enter, esc, tab, space, up/down/left/right, delete, home, end…)
+  TEXT bonjour          tape du texte (disposition QWERTY US)
+  VOL+  VOL-  MUTE  PLAY  NEXT  PREV  LUM+  LUM-
+  MOUSE 100 -50         déplace la souris (x, y)
+  CLIC  CLICD           clic gauche / clic droit
+  MOLETTE -3            défilement (négatif = vers le bas)
+  q                     quitter"""
+
+
+def ouvrir(port):
+    try:
+        ser = serial.Serial(port, 115200, timeout=0.1)
+    except serial.SerialException as e:
+        sys.exit(f"Impossible d'ouvrir {port} : {e}\n(mpremote est peut-être encore connecté)")
+    time.sleep(0.5)
+    ser.reset_input_buffer()
+    return ser
+
+
+def envoyer(ser, commande, attente=3.0):
+    ser.write((commande.strip() + "\n").encode())
+    ser.flush()
+    fin = time.time() + attente
+    while time.time() < fin:
+        ligne = ser.readline().decode(errors="ignore").strip()
+        if ligne.startswith(("OK", "ERR", "PONG")):
+            print("  ->", ligne)
+            return ligne
+    print("  -> pas de réponse")
+    return None
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Test clavier/souris de l'ESP32")
+    parser.add_argument("port", help="port série de l'ESP32, ex. COM4")
+    parser.add_argument("--cmd", help="envoie une seule commande puis quitte")
+    args = parser.parse_args()
+
+    ser = ouvrir(args.port)
+    if args.cmd:
+        envoyer(ser, args.cmd)
+        return
+    print(AIDE)
+    while True:
+        try:
+            commande = input("> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            break
+        if commande.lower() == "q":
+            break
+        if commande:
+            envoyer(ser, commande)
+
+
+if __name__ == "__main__":
+    main()
+```
+
+## app/pubspec.yaml (inchangé depuis la Phase 0)
 
 ```yaml
 name: esp_micro
@@ -397,4 +713,262 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+```
+
+## hid.py installé
+
+mip a installé la version **compilée** `/lib/usb/device/hid.mpy` (1569 octets, SHA-256 `dd106a6a2ee2597457695d05a703dffe533865827d2dff2af0154a45e34f4ac8`), pas de `hid.py` lisible sur la carte. Le hash correspond à l'entrée `usb/device/hid.mpy` (`dd106a6a`) de l'index mip pour usb-device-hid **0.2.0**. Ci-dessous, la source `usb/device/hid.py` de la même version 0.2.0, téléchargée depuis le même index (`https://micropython.org/pi/v2/file/95/951892ce`, hash vérifié `951892ce`) :
+
+```python
+# MicroPython USB hid module
+#
+# This implements a base HIDInterface class that can be used directly,
+# or subclassed into more specific HID interface types.
+#
+# MIT license; Copyright (c) 2023 Angus Gratton
+from micropython import const
+import machine
+import struct
+import time
+from .core import Interface, Descriptor, split_bmRequestType
+
+_EP_IN_FLAG = const(1 << 7)
+
+# Control transfer stages
+_STAGE_IDLE = const(0)
+_STAGE_SETUP = const(1)
+_STAGE_DATA = const(2)
+_STAGE_ACK = const(3)
+
+# Request types
+_REQ_TYPE_STANDARD = const(0x0)
+_REQ_TYPE_CLASS = const(0x1)
+_REQ_TYPE_VENDOR = const(0x2)
+_REQ_TYPE_RESERVED = const(0x3)
+
+# Descriptor types
+_DESC_HID_TYPE = const(0x21)
+_DESC_REPORT_TYPE = const(0x22)
+_DESC_PHYSICAL_TYPE = const(0x23)
+
+# Interface and protocol identifiers
+_INTERFACE_CLASS = const(0x03)
+_INTERFACE_SUBCLASS_NONE = const(0x00)
+_INTERFACE_SUBCLASS_BOOT = const(0x01)
+
+# These values will only make sense when interface subclass
+# is 0x01, which indicates boot protocol support.
+_INTERFACE_PROTOCOL_NONE = const(0x00)
+_INTERFACE_PROTOCOL_KEYBOARD = const(0x01)
+_INTERFACE_PROTOCOL_MOUSE = const(0x02)
+
+# bRequest values for HID control requests
+_REQ_CONTROL_GET_REPORT = const(0x01)
+_REQ_CONTROL_GET_IDLE = const(0x02)
+_REQ_CONTROL_GET_PROTOCOL = const(0x03)
+_REQ_CONTROL_GET_DESCRIPTOR = const(0x06)
+_REQ_CONTROL_SET_REPORT = const(0x09)
+_REQ_CONTROL_SET_IDLE = const(0x0A)
+_REQ_CONTROL_SET_PROTOCOL = const(0x0B)
+
+# Standard descriptor lengths
+_STD_DESC_INTERFACE_LEN = const(9)
+_STD_DESC_ENDPOINT_LEN = const(7)
+
+
+class HIDInterface(Interface):
+    # Abstract base class to implement a USB device HID interface in Python.
+
+    def __init__(
+        self,
+        report_descriptor,
+        extra_descriptors=[],
+        set_report_buf=None,
+        protocol=_INTERFACE_PROTOCOL_NONE,
+        interface_str=None,
+        interval_ms=8,
+    ):
+        # Construct a new HID interface.
+        #
+        # - report_descriptor is the only mandatory argument, which is the binary
+        # data consisting of the HID Report Descriptor. See Device Class
+        # Definition for Human Interface Devices (HID) v1.11 section 6.2.2 Report
+        # Descriptor, p23.
+        #
+        # - extra_descriptors is an optional argument holding additional HID
+        #   descriptors, to append after the mandatory report descriptor. Most
+        #   HID devices do not use these.
+        #
+        # - set_report_buf is an optional writable buffer object (i.e.
+        #   bytearray), where SET_REPORT requests from the host can be
+        #   written. Only necessary if the report_descriptor contains Output
+        #   entries. If set, the size must be at least the size of the largest
+        #   Output entry.
+        #
+        # - protocol can be set to a specific value as per HID v1.11 section 4.3 Protocols, p9.
+        #
+        # - interface_str is an optional string descriptor to associate with the HID USB interface.
+        #
+        # - interval_ms this is the polling rate the device will request the host use in milliseconds.
+        super().__init__()
+        self.report_descriptor = report_descriptor
+        self.extra_descriptors = extra_descriptors
+        self._set_report_buf = set_report_buf
+        self.protocol = protocol
+        self.interface_str = interface_str
+        self.interval_ms = interval_ms
+
+        self._int_ep = None  # set during enumeration
+
+    def get_report(self):
+        return False
+
+    def on_set_report(self, report_data, report_id, report_type):
+        # Override this function in order to handle SET REPORT requests from the host,
+        # where it sends data to the HID device.
+        #
+        # This function will only be called if the Report descriptor contains at least one Output entry,
+        # and the set_report_buf argument is provided to the constructor.
+        #
+        # Return True to complete the control transfer normally, False to abort it.
+        return True
+
+    def busy(self):
+        # Returns True if the interrupt endpoint is busy (i.e. existing transfer is pending)
+        return self.is_open() and self.xfer_pending(self._int_ep)
+
+    def send_report(self, report_data, timeout_ms=100):
+        # Helper function to send a HID report in the typical USB interrupt
+        # endpoint associated with a HID interface.
+        #
+        # Returns True if successful, False if HID device is not active or timeout
+        # is reached without being able to queue the report for sending.
+        deadline = time.ticks_add(time.ticks_ms(), timeout_ms)
+        while self.busy():
+            if time.ticks_diff(deadline, time.ticks_ms()) <= 0:
+                return False
+            machine.idle()
+        if not self.is_open():
+            return False
+        self.submit_xfer(self._int_ep, report_data)
+        return True
+
+    def desc_cfg(self, desc, itf_num, ep_num, strs):
+        # Add the standard interface descriptor
+        desc.interface(
+            itf_num,
+            1,
+            _INTERFACE_CLASS,
+            _INTERFACE_SUBCLASS_NONE
+            if self.protocol == _INTERFACE_PROTOCOL_NONE
+            else _INTERFACE_SUBCLASS_BOOT,
+            self.protocol,
+            len(strs) if self.interface_str else 0,
+        )
+
+        if self.interface_str:
+            strs.append(self.interface_str)
+
+        # As per HID v1.11 section 7.1 Standard Requests, return the contents of
+        # the standard HID descriptor before the associated endpoint descriptor.
+        self.get_hid_descriptor(desc)
+
+        # Add the typical single USB interrupt endpoint descriptor associated
+        # with a HID interface.
+        self._int_ep = ep_num | _EP_IN_FLAG
+        desc.endpoint(self._int_ep, "interrupt", 8, self.interval_ms)
+
+        self.idle_rate = 0
+
+        # This variable is reused to track boot protocol status.
+        # 0 for boot protocol, 1 for report protocol
+        # According to Device Class Definition for Human Interface Devices (HID) v1.11
+        # Appendix F.5, the device comes up in non-boot mode by default.
+        self.protocol = 1
+
+    def num_eps(self):
+        return 1
+
+    def get_hid_descriptor(self, desc=None):
+        # Append a full USB HID descriptor from the object's report descriptor
+        # and optional additional descriptors.
+        #
+        # See HID Specification Version 1.1, Section 6.2.1 HID Descriptor p22
+
+        l = 9 + 3 * len(self.extra_descriptors)  # total length
+
+        if desc is None:
+            desc = Descriptor(bytearray(l))
+
+        desc.pack(
+            "<BBHBBBH",
+            l,  # bLength
+            _DESC_HID_TYPE,  # bDescriptorType
+            0x111,  # bcdHID
+            0,  # bCountryCode
+            len(self.extra_descriptors) + 1,  # bNumDescriptors
+            0x22,  # bDescriptorType, Report
+            len(self.report_descriptor),  # wDescriptorLength, Report
+        )
+        # Fill in any additional descriptor type/length pairs
+        #
+        # TODO: unclear if this functionality is ever used, may be easier to not
+        # support in base class
+        for dt, dd in self.extra_descriptors:
+            desc.pack("<BH", dt, len(dd))
+
+        return desc.b
+
+    def on_interface_control_xfer(self, stage, request):
+        # Handle standard and class-specific interface control transfers for HID devices.
+        bmRequestType, bRequest, wValue, _, wLength = struct.unpack("BBHHH", request)
+
+        recipient, req_type, _ = split_bmRequestType(bmRequestType)
+
+        if stage == _STAGE_SETUP:
+            if req_type == _REQ_TYPE_STANDARD:
+                # HID Spec p48: 7.1 Standard Requests
+                if bRequest == _REQ_CONTROL_GET_DESCRIPTOR:
+                    desc_type = wValue >> 8
+                    if desc_type == _DESC_HID_TYPE:
+                        return self.get_hid_descriptor()
+                    if desc_type == _DESC_REPORT_TYPE:
+                        # Reset to report protocol when report descriptor is requested
+                        self.protocol = 1
+                        return self.report_descriptor
+            elif req_type == _REQ_TYPE_CLASS:
+                # HID Spec p50: 7.2 Class-Specific Requests
+                if bRequest == _REQ_CONTROL_GET_REPORT:
+                    print("GET_REPORT?")
+                    return False  # Unsupported for now
+                if bRequest == _REQ_CONTROL_GET_IDLE:
+                    return bytes([self.idle_rate])
+                if bRequest == _REQ_CONTROL_GET_PROTOCOL:
+                    return bytes([self.protocol])
+                if bRequest in (_REQ_CONTROL_SET_IDLE, _REQ_CONTROL_SET_PROTOCOL):
+                    return True
+                if bRequest == _REQ_CONTROL_SET_REPORT:
+                    return self._set_report_buf  # If None, request will stall
+            return False  # Unsupported request
+
+        if stage == _STAGE_ACK:
+            if req_type == _REQ_TYPE_CLASS:
+                if bRequest == _REQ_CONTROL_SET_IDLE:
+                    self.idle_rate = wValue >> 8
+                elif bRequest == _REQ_CONTROL_SET_PROTOCOL:
+                    self.protocol = wValue
+                elif bRequest == _REQ_CONTROL_SET_REPORT:
+                    report_id = wValue & 0xFF
+                    report_type = wValue >> 8
+                    report_data = self._set_report_buf
+                    if wLength < len(report_data):
+                        # need to truncate the response in the callback if we got less bytes
+                        # than allowed for in the buffer
+                        report_data = memoryview(self._set_report_buf)[:wLength]
+                    self.on_set_report(report_data, report_id, report_type)
+
+        return True  # allow DATA/ACK stages to complete normally
+
+
+__version__ = '0.2.0'
 ```
