@@ -164,14 +164,18 @@ class Interface:
         return "normal"
 
     def _changer_mode(self, ancien, nouveau, etat, maintenant):
+        duree_ancien = self._age(self.mode_depuis, maintenant)
         self.mode = nouveau
         self.mode_depuis = maintenant
         if ancien is None:
             self.reagir("coucou", "Bonjour !")
         elif nouveau == "absent":
-            self.reagir("power", "À bientôt !")
+            # pas de bandeau si on était verrouillé (on dort déjà) ou réveillé quelques secondes
+            if ancien != "verrou" and duree_ancien > 20000:
+                self.reagir("power", "À bientôt !")
         elif ancien == "absent":
-            self.reagir("coucou", "Bonjour Mihaja !")
+            if duree_ancien > 60000:  # seulement après une vraie absence (pas un réveil bref)
+                self.reagir("coucou", "Bonjour Mihaja !")
         elif nouveau == "jeu":
             self.reagir("manette", "Mode jeu")
         elif nouveau == "verrou":

@@ -29,9 +29,12 @@ perf = {"cpu_temp": -1, "fps": -1}
 evt = {"casque": "", "manette": 0, "verrou": 0, "jeu": ""}
 etat = {"connecte": False, "stat": stat, "gpu": gpu, "perf": perf, "evt": evt, "meteo": []}
 
-ATTENTE_ABSENT = 8000      # sans données depuis 8 s = PC éteint / en veille / agent arrêté
+ATTENTE_ABSENT = 12000     # sans données depuis 12 s = PC éteint / en veille / agent arrêté
+RETOUR_PC = 5000           # il faut 5 s de données sans coupure pour dire « le PC est revenu »
+                           # (en veille moderne, Windows se réveille quelques secondes de temps en temps)
 IMAGE_MS = 80              # une image toutes les 80 ms (≈ 12 images / s)
 derniere_donnee = time.ticks_add(time.ticks_ms(), -ATTENTE_ABSENT)
+debut_flux = None          # début du flux de données en cours
 ecran_allume = True
 luminosite_actuelle = -1
 
@@ -124,7 +127,7 @@ def reaction_action(arg):
 
 
 def executer(ligne):
-    global derniere_donnee, ecran_allume
+    global derniere_donnee, ecran_allume, debut_flux
     mots = ligne.split(" ", 1)
     cmd = mots[0].upper()
     arg = mots[1] if len(mots) > 1 else ""
@@ -153,8 +156,13 @@ def executer(ligne):
         return "OK"
     # --- données du programme PC -------------------------------------------
     if cmd in ("STAT", "GPU", "PERF", "EVT", "TEMPS", "METEO_J"):
-        derniere_donnee = time.ticks_ms()
-        etat["connecte"] = True
+        maintenant = time.ticks_ms()
+        if not etat["connecte"]:
+            if debut_flux is None or time.ticks_diff(maintenant, derniere_donnee) > 3000:
+                debut_flux = maintenant
+            if time.ticks_diff(maintenant, debut_flux) >= RETOUR_PC:
+                etat["connecte"] = True
+        derniere_donnee = maintenant
     if cmd == "STAT":
         try:
             v = [int(x) for x in arg.split()]

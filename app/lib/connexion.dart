@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart' show AppLifecycleListener;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
@@ -12,12 +13,31 @@ const int portApp = 8765;
 
 enum Statut { sansAdresse, deconnecte, connexion, appairage, connecte }
 
+/// Une app du PC : un lien web, un chemin Windows, ou une commande (« autre »).
+class AppPc {
+  final String nom;
+  final String cible;
+  final String type; // web | chemin | autre
+
+  const AppPc(this.nom, this.cible, this.type);
+
+  bool get web => type == 'web';
+
+  static AppPc depuis(dynamic e) {
+    if (e is Map) {
+      return AppPc((e['nom'] ?? '').toString(), (e['cible'] ?? '').toString(),
+          (e['type'] ?? 'autre').toString());
+    }
+    return AppPc(e.toString(), '', 'autre'); // ancien programme PC : juste le nom
+  }
+}
+
 class Connexion extends ChangeNotifier {
   String adresse = '';
   String? _token;
   Statut statut = Statut.sansAdresse;
   EtatPC etat = EtatPC.vide();
-  List<String> apps = [];
+  List<AppPc> apps = [];
   String message = '';
   int numeroMessage = 0; // change à chaque nouveau message (pour afficher une notification)
   bool pinAffiche = false;
@@ -31,11 +51,16 @@ class Connexion extends ChangeNotifier {
   double _dy = 0;
   bool _authEnvoyee = false;
   bool _fini = false;
+  int _echecs = 0;
+  DateTime _dernierEtat = DateTime.fromMillisecondsSinceEpoch(0);
+  AppLifecycleListener? _cycle;
 
   bool get appaire => _token != null;
   bool get connecte => statut == Statut.connecte;
 
   Future<void> charger() async {
+    // retour sur l'app : on se reconnecte tout de suite si la liaison est morte en arrière-plan
+    _cycle ??= AppLifecycleListener(onResume: _auRetour);
     final p = await SharedPreferences.getInstance();
     adresse = p.getString('adresse') ?? '';
     _token = p.getString('token');
@@ -85,6 +110,15 @@ class Connexion extends ChangeNotifier {
     }
   }
 
+  void _auRetour() {
+    if (adresse.isEmpty) return;
+    final silence = DateTime.now().difference(_dernierEtat);
+    if (statut != Statut.connecte || silence > const Duration(seconds: 2)) {
+      _echecs = 0;
+      connecter();
+    }
+  }
+
   void _fermerCanal() {
     _abonnement?.cancel();
     _abonnement = null;
@@ -101,7 +135,9 @@ class Connexion extends ChangeNotifier {
       notifyListeners();
     }
     _reconnexion?.cancel();
-    _reconnexion = Timer(const Duration(seconds: 3), connecter);
+    // premier essai très vite (coupure brève), puis toutes les 3 s
+    _echecs++;
+    _reconnexion = Timer(Duration(milliseconds: _echecs <= 1 ? 500 : 3000), connecter);
   }
 
   void _recevoir(dynamic brut) {
@@ -126,6 +162,7 @@ class Connexion extends ChangeNotifier {
           SharedPreferences.getInstance().then((p) => p.setString('token', token));
         }
         statut = Statut.connecte;
+        _echecs = 0;
         pinAffiche = false;
         _envoyer({'type': 'apps'});
       case 'erreur':
@@ -141,11 +178,12 @@ class Connexion extends ChangeNotifier {
         pinAffiche = true;
       case 'etat':
         etat = EtatPC.depuisJson(m);
+        _dernierEtat = DateTime.now();
       case 'rep':
         _annoncer((m['texte'] ?? '').toString());
       case 'apps':
         final liste = m['apps'];
-        if (liste is List) apps = liste.map((e) => e.toString()).toList();
+        if (liste is List) apps = liste.map(AppPc.depuis).where((a) => a.nom.isNotEmpty).toList();
     }
     notifyListeners();
   }
@@ -178,6 +216,12 @@ class Connexion extends ChangeNotifier {
 
   void rafraichirApps() => _envoyer({'type': 'apps'});
 
+  /// Ajoute une app sur le PC. [sorte] : 'web' (lien) ou 'chemin' (fichier / programme Windows).
+  void ajouterApp(String nom, String cible, String sorte) =>
+      _envoyer({'type': 'app_ajout', 'nom': nom.trim(), 'cible': cible.trim(), 'sorte': sorte});
+
+  void retirerApp(String nom) => _envoyer({'type': 'app_retrait', 'nom': nom});
+
   /// Déplacement de souris : regroupé et envoyé environ 60 fois par seconde.
   void souris(double dx, double dy) {
     _dx += dx;
@@ -208,6 +252,7 @@ class Connexion extends ChangeNotifier {
   @override
   void dispose() {
     _fini = true;
+    _cycle?.dispose();
     _reconnexion?.cancel();
     _minuterieSouris?.cancel();
     _fermerCanal();

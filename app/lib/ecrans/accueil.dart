@@ -171,13 +171,13 @@ class EcranAccueil extends StatelessWidget {
             spacing: 10,
             runSpacing: 8,
             alignment: WrapAlignment.center,
+            // toujours les mêmes pastilles, à la même place : rien ne saute quand une valeur manque
             children: [
-              if (e.bat >= 0)
-                _pastille(e.enCharge ? Icons.bolt_rounded : Icons.battery_std_rounded, '${e.bat} %',
-                    e.bat < 20 && !e.enCharge ? Couleurs.rouge : Couleurs.orange),
-              if (e.vol >= 0) _pastille(Icons.volume_up_rounded, '${e.vol} %', Couleurs.cyan),
-              if (e.cpuTemp >= 0) _pastille(Icons.thermostat_rounded, 'CPU ${e.cpuTemp}°', Couleurs.vert),
-              if (e.gpuTemp >= 0) _pastille(Icons.memory_rounded, 'GPU ${e.gpuTemp}°', Couleurs.magenta),
+              _pastille(e.enCharge ? Icons.bolt_rounded : Icons.battery_std_rounded, _v(e.bat, ' %'),
+                  e.bat >= 0 && e.bat < 20 && !e.enCharge ? Couleurs.rouge : Couleurs.orange),
+              _pastille(Icons.volume_up_rounded, _v(e.vol, ' %'), Couleurs.cyan),
+              _pastille(Icons.thermostat_rounded, 'CPU ${_v(e.cpuTemp, '°')}', Couleurs.vert),
+              _pastille(Icons.memory_rounded, 'GPU ${_v(e.gpuTemp, '°')}', Couleurs.magenta),
               if (e.casque.isNotEmpty) _pastille(Icons.headphones_rounded, e.casque, Couleurs.cyan),
             ],
           ),
@@ -185,6 +185,9 @@ class EcranAccueil extends StatelessWidget {
       ),
     );
   }
+
+  /// Valeur affichée, ou un tiret discret si elle est inconnue.
+  String _v(int valeur, String unite) => valeur >= 0 ? '$valeur$unite' : '–';
 
   Widget _pastille(IconData icone, String texte, Color couleur) {
     return Container(
@@ -256,22 +259,17 @@ class EcranAccueil extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Titre('Actions rapides', icone: Icons.flash_on_rounded),
-          GridView.count(
-            crossAxisCount: 4,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            mainAxisSpacing: 10,
-            crossAxisSpacing: 10,
-            childAspectRatio: 0.85,
-            children: [
-              BoutonAction(icone: Icons.lock_rounded, texte: 'Verrouiller', onTap: () => cx.cmd('VERROU')),
+          GrilleBoutons(
+            colonnes: 4,
+            enfants: [
+              BoutonAction(icone: Icons.lock_rounded, texte: 'Verrou', onTap: () => cx.cmd('VERROU')),
               BoutonAction(
                   icone: Icons.desktop_access_disabled_rounded,
                   texte: 'Écran PC',
                   onTap: () => cx.cmd('ECRAN_OFF')),
               BoutonAction(
                 icone: e.ecranEsp ? Icons.lightbulb_rounded : Icons.lightbulb_outline_rounded,
-                texte: 'Écran ESP32',
+                texte: 'ESP32',
                 couleur: e.ecranEsp ? Couleurs.orange : Couleurs.gris,
                 onTap: () => cx.cmd(e.ecranEsp ? 'ECRAN_ESP 0' : 'ECRAN_ESP 1'),
               ),

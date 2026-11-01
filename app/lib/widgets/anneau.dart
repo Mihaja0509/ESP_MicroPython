@@ -38,7 +38,7 @@ class Anneau extends StatelessWidget {
               painter: _Peintre(v / 100, couleur),
               child: Center(
                 child: Text(
-                  connu ? '${v.round()}$unite' : '',
+                  connu ? '${v.round()}$unite' : '–',
                   style: TextStyle(
                     fontSize: taille * 0.22,
                     fontWeight: FontWeight.w700,

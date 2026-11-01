@@ -30,6 +30,8 @@ import collections
 import ctypes
 import glob
 import json
+import os
+import re
 import subprocess
 import sys
 import threading
@@ -73,6 +75,8 @@ FICHIER_PAUSE = DOSSIER / "PAUSE"
 FICHIER_LOG = DOSSIER / "agent.log"
 FICHIER_REGLAGES = DOSSIER / "reglages.json"
 FICHIER_APPAREILS = DOSSIER / "appareils.json"   # téléphones appairés (jamais dans Git)
+ACTIF_SI = 60       # s : une touche / la souris dans la dernière minute = quelqu'un est là
+MUET_MAX = 300      # s : après 5 min réveillé sans personne, on reprend quand même
 REGLAGES_DEFAUT = {"ville": "", "latitude": None, "longitude": None}
 URL_METEO = ("https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
              "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max"
@@ -98,6 +102,7 @@ MOTS_EXTERNES = ("USB", "BTH", "BLUETOOTH")
 
 AIDE = """Commandes PC :
   APPS                  liste des apps   |  APP spotify    ouvre une app
+  (les apps s'ajoutent / se retirent depuis l'app du téléphone, ou dans apps.json)
   LUM 70  LUM+  LUM-    luminosité de l'écran du PC
   VERROU                verrouille        |  ECRAN_OFF      verrouille + éteint l'écran
   VEILLE                mise en veille    |  ARRET          arrêt dans 60 s  |  ANNULER
@@ -115,6 +120,7 @@ class Liaison:
         self.port_force = port_force
         self.ser = None
         self.verrou = threading.Lock()
+        self.muet = False  # PC réveillé tout seul par Windows : on ne dit rien à l'ESP32
 
     def trouver_port(self):
         if self.port_force:
@@ -161,6 +167,8 @@ class Liaison:
         with self.verrou:
             if self.ser is None:
                 return False
+            if self.muet:
+                return True
             try:
                 self.ser.write((ligne.strip() + "\n").encode())
                 return True
@@ -416,7 +424,7 @@ class LecteurLHM:
                 arbre = json.loads(r.read().decode("utf-8", errors="ignore"))
         except Exception as e:
             self.probleme = f"LibreHardwareMonitor injoignable ({e.__class__.__name__})"
-            self.reessayer_a = time.time() + 10
+            self.reessayer_a = time.time() + 3
             return -1
         self.probleme = ""
         valeurs = {}
@@ -729,6 +737,19 @@ def pc_verrouille():
     return not ok
 
 
+class _LASTINPUTINFO(ctypes.Structure):
+    _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_uint)]
+
+
+def inactivite():
+    """Secondes depuis la dernière touche / souris sur le PC."""
+    info = _LASTINPUTINFO(ctypes.sizeof(_LASTINPUTINFO), 0)
+    if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(info)):
+        return 0.0
+    maintenant = ctypes.windll.kernel32.GetTickCount() & 0xFFFFFFFF
+    return ((maintenant - info.dwTime) & 0xFFFFFFFF) / 1000.0
+
+
 def batterie():
     b = psutil.sensors_battery()
     if b is None:
@@ -739,11 +760,101 @@ def batterie():
 # --------------------------------------------------------------------------
 # Commandes PC
 # --------------------------------------------------------------------------
+VERROU_APPS = threading.Lock()
+
+
 def charger_apps():
-    if not FICHIER_APPS.exists():
-        FICHIER_APPS.write_text(json.dumps(APPS_DEFAUT, ensure_ascii=False, indent=2),
-                                encoding="utf-8")
-    return json.loads(FICHIER_APPS.read_text(encoding="utf-8"))
+    """Apps du PC : dict nom -> cible (lien web, chemin Windows ou commande)."""
+    with VERROU_APPS:
+        if not FICHIER_APPS.exists():
+            FICHIER_APPS.write_text(json.dumps(APPS_DEFAUT, ensure_ascii=False, indent=2),
+                                    encoding="utf-8")
+        try:
+            apps = json.loads(FICHIER_APPS.read_text(encoding="utf-8"))
+        except ValueError:
+            return {}
+    return {str(k): str(v) for k, v in apps.items()} if isinstance(apps, dict) else {}
+
+
+def _ecrire_apps(apps):
+    with VERROU_APPS:
+        provisoire = FICHIER_APPS.with_suffix(".tmp")
+        provisoire.write_text(json.dumps(apps, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(provisoire, FICHIER_APPS)
+
+
+def type_app(cible):
+    if re.match(r"^https?://", cible, re.I):
+        return "web"
+    if re.match(r"^([A-Za-z]:[\\/]|\\\\|%)", cible):
+        return "chemin"
+    return "autre"
+
+
+def liste_apps():
+    """Pour le téléphone : [{nom, cible, type}]."""
+    return [{"nom": n, "cible": c, "type": type_app(c)} for n, c in charger_apps().items()]
+
+
+def trouver_app(apps, nom):
+    nom = nom.strip().lower()
+    for n in apps:
+        if n.lower() == nom:
+            return n
+    return None
+
+
+def ajouter_app(nom, cible, sorte):
+    """Ajoute (ou remplace) une app. Renvoie (ok, texte)."""
+    nom = " ".join(str(nom).split())
+    cible = str(cible).strip()
+    if not nom or len(nom) > 30:
+        return False, "Nom vide ou trop long (30 caractères max)"
+    if any(ord(c) < 32 for c in nom + cible) or '"' in nom + cible:
+        return False, "Caractères interdits (guillemets, retours à la ligne)"
+    if not cible or len(cible) > 400:
+        return False, "Lien ou chemin vide ou trop long"
+    if sorte == "web":
+        if not re.match(r"^[a-z][a-z0-9+.-]*://", cible, re.I):
+            cible = "https://" + cible
+        morceaux = urllib.parse.urlparse(cible)
+        if (morceaux.scheme.lower() not in ("http", "https")
+                or not re.match(r"^[\w.-]+(:\d{1,5})?$", morceaux.netloc)):
+            return False, "Lien web invalide (ex. https://www.youtube.com)"
+    elif sorte == "chemin":
+        cible = cible.strip('"')
+        if type_app(cible) != "chemin":
+            return False, "Chemin Windows invalide (ex. C:\\Jeux\\jeu.exe)"
+        if not os.path.exists(os.path.expandvars(cible)):
+            return False, f"Introuvable sur le PC : {cible}"
+    else:
+        return False, "Type inconnu (web ou chemin)"
+    apps = charger_apps()
+    ancien = trouver_app(apps, nom)
+    if ancien is not None:
+        del apps[ancien]
+    apps[nom] = cible
+    _ecrire_apps(apps)
+    return True, ("App modifiée : " if ancien else "App ajoutée : ") + nom
+
+
+def retirer_app(nom):
+    apps = charger_apps()
+    trouve = trouver_app(apps, str(nom))
+    if trouve is None:
+        return False, f"App inconnue : {nom}"
+    del apps[trouve]
+    _ecrire_apps(apps)
+    return True, f"App retirée : {trouve}"
+
+
+def lancer_app(cible):
+    cible = os.path.expandvars(cible)
+    try:
+        os.startfile(cible)
+    except OSError:
+        # commandes du PATH (code, explorer…) : on passe par « start »
+        subprocess.Popen(f'start "" "{cible}"', shell=True)
 
 
 def luminosite_actuelle():
@@ -767,11 +878,11 @@ def executer_pc(ligne):
         return "Apps : " + ", ".join(charger_apps().keys())
     if cmd == "APP":
         apps = charger_apps()
-        cible = apps.get(arg.lower())
-        if cible is None:
-            return f"App inconnue : {arg} (ajoute-la dans {FICHIER_APPS})"
-        subprocess.Popen(f'start "" "{cible}"', shell=True)
-        return f"Ouverture : {arg}"
+        nom = trouver_app(apps, arg)
+        if nom is None:
+            return f"App inconnue : {arg} (ajoute-la depuis le téléphone)"
+        lancer_app(apps[nom])
+        return f"Ouverture : {nom}"
     if cmd in ("LUM", "LUM+", "LUM-"):
         if sbc is None:
             return "screen_brightness_control n'est pas installé"
@@ -832,6 +943,8 @@ class Agent:
         self.ecran_esp = True
         self.telephones = 0
         self.lent = {"bat": (-1, 0), "cpu_temp": -1}
+        self.bons = {}           # dernière valeur valide de chaque mesure (évite les « trous »)
+        self.reveil = 0.0        # heure du dernier réveil « tout seul » (veille moderne), 0 = non
         self.lhm = LecteurLHM()
         self.fps = CompteurFPS()
 
@@ -850,8 +963,11 @@ class Agent:
             print(f"[agent] {self.fps.probleme}")
         tour = 0
         prochaine_connexion = 0.0
+        tour_avant = time.time()
         while self.actif:
             debut = time.time()
+            self._surveiller_reveil(debut - tour_avant)
+            tour_avant = debut
             # --- liaison avec l'ESP32 (les mesures continuent même sans elle, pour l'app) ---
             if FICHIER_PAUSE.exists():
                 if self.liaison.ser is not None:
@@ -859,6 +975,8 @@ class Agent:
                     print("[agent] pause : port COM libéré")
             elif self.liaison.ser is None and debut >= prochaine_connexion:
                 if self.liaison.connecter():
+                    if tour > 0:
+                        self._reveil_discret("liaison USB revenue")
                     self.precedent = {}  # renvoie tous les états après reconnexion
                     self.dernier_temps = 0.0
                     self.meteo_envoyee = -1
@@ -872,15 +990,18 @@ class Agent:
             # --- mesures rapides : 4 fois par seconde ---
             cpu = round(psutil.cpu_percent(interval=None))
             ram = round(psutil.virtual_memory().percent)
-            vol = volume()
+            vol = self._garder("vol", volume(), 10)
             bat, charge = self.lent["bat"]
             self.dernier_stat = f"STAT {cpu} {ram} {vol} {bat} {charge}"
             self.liaison.envoyer(self.dernier_stat)
             t, u, mem = gpu()
+            t = self._garder("gpu_t", t)
+            u = self._garder("gpu_u", u)
+            mem = self._garder("gpu_m", mem)
             self.dernier_gpu = f"GPU {t} {u} {mem}"
             self.liaison.envoyer(self.dernier_gpu)
             en_jeu = self.precedent.get("JEU", "-") != "-"
-            fps = self.fps.fps() if en_jeu else -1
+            fps = self._garder("fps", self.fps.fps(), 3) if en_jeu else -1
             self.dernier_perf = f"PERF {self.lent['cpu_temp']} {fps}"
             self.liaison.envoyer(self.dernier_perf)
 
@@ -899,6 +1020,45 @@ class Agent:
             tour += 1
             time.sleep(max(0.0, 0.25 - (time.time() - debut)))
 
+    def _reveil_discret(self, raison):
+        """Windows (veille moderne) réveille le PC quelques secondes de temps en temps.
+        Tant que personne n'utilise le PC, on ne dit rien à l'ESP32 : elle reste en veille
+        au lieu de dire « Bonjour » à chaque petit réveil."""
+        if inactivite() < ACTIF_SI:
+            return
+        if not self.liaison.muet:
+            print(f"[agent] réveil sans utilisateur ({raison}) : ESP32 laissée en veille")
+        self.liaison.muet = True
+        self.reveil = time.time()
+
+    def _surveiller_reveil(self, ecart):
+        if ecart > 45:  # la boucle a été endormie : le PC sort de veille
+            self._reveil_discret(f"pause de {round(ecart)} s")
+        if self.liaison.muet:
+            if inactivite() < ACTIF_SI or time.time() - self.reveil > MUET_MAX:
+                self.reprendre()
+
+    def reprendre(self):
+        """Quelqu'un utilise le PC (ou le téléphone) : l'ESP32 se réveille."""
+        if not self.liaison.muet:
+            return
+        self.liaison.muet = False
+        self.precedent = {}  # renvoie tous les états
+        self.dernier_temps = 0.0
+        self.meteo_envoyee = -1
+        print("[agent] PC utilisé : l'ESP32 se réveille")
+
+    def _garder(self, cle, valeur, duree=30):
+        """Une mesure ratée (-1) garde la dernière bonne valeur pendant `duree` secondes,
+        pour que l'écran et l'app ne clignotent pas."""
+        if valeur is not None and valeur >= 0:
+            self.bons[cle] = (valeur, time.time())
+            return valeur
+        ancien = self.bons.get(cle)
+        if ancien is not None and time.time() - ancien[1] < duree:
+            return ancien[0]
+        return valeur
+
     def _mesures_lentes(self):
         if time.time() - self.dernier_temps > 60:
             self.dernier_temps = time.time()
@@ -906,7 +1066,7 @@ class Agent:
             self.liaison.envoyer(f"TEMPS {lt.tm_year} {lt.tm_mon} {lt.tm_mday} {lt.tm_wday} "
                                  f"{lt.tm_hour} {lt.tm_min} {lt.tm_sec}")
         self.lent["bat"] = batterie()
-        self.lent["cpu_temp"] = self.lhm.temperature_cpu()
+        self.lent["cpu_temp"] = self._garder("cpu_t", self.lhm.temperature_cpu())
         if self.meteo.a_mettre_a_jour():
             self.meteo.lancer()
         if self.meteo.jours and self.meteo_envoyee != self.meteo.version:
@@ -939,6 +1099,7 @@ class Agent:
         if not ligne:
             return ""
         cmd = ligne.split(" ", 1)[0].upper()
+        self.reprendre()
         reponse = executer_pc(ligne)
         if reponse is not None:
             if cmd not in ("APPS", "AUDIO"):
@@ -967,7 +1128,8 @@ class Agent:
         return {
             "executer": self.executer,
             "etat": lambda: self.donnees,
-            "apps": lambda: list(charger_apps().keys()),
+            "apps": liste_apps,
+            "ajouter_app": ajouter_app, "retirer_app": retirer_app,
             "afficher_pin": afficher_pin,
             "souris": souris_pc, "clic": clic_pc, "molette": molette_pc,
             "texte": texte, "connexion": connexion,

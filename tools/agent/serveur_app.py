@@ -13,10 +13,12 @@ Messages (JSON, un par message) :
     {"type": "molette", "n": -2}
     {"type": "texte", "texte": "Bonjour à tous"}     tape le texte (accents compris)
     {"type": "apps"}                                 liste des apps
+    {"type": "app_ajout", "nom": "YouTube", "cible": "https://…", "sorte": "web"|"chemin"}
+    {"type": "app_retrait", "nom": "YouTube"}
   PC -> téléphone
     {"type": "auth_requise"} {"type": "auth_ok", "token": "..."} {"type": "erreur", "texte": "..."}
     {"type": "pin_affiche"} {"type": "etat", ...} (4 fois / s) {"type": "rep", "ligne": ..., "texte": ...}
-    {"type": "apps", "apps": [...]}
+    {"type": "apps", "apps": [{"nom": ..., "cible": ..., "type": "web"|"chemin"|"autre"}, ...]}
 """
 import asyncio
 import json
@@ -36,6 +38,7 @@ class ServeurApp:
     def __init__(self, fichier_appareils, rappels):
         """rappels : dict de fonctions fournies par l'agent :
         executer(ligne) -> str, etat() -> dict, apps() -> list, afficher_pin(pin),
+        ajouter_app(nom, cible, sorte) -> (ok, texte), retirer_app(nom) -> (ok, texte),
         souris(dx, dy), clic(bouton), molette(n), texte(t), connexion(nb_telephones)."""
         self.fichier = Path(fichier_appareils)
         self.r = rappels
@@ -148,6 +151,16 @@ class ServeurApp:
                 elif typ == "texte":
                     await boucle.run_in_executor(None, self.r["texte"], str(m.get("texte", ""))[:500])
                 elif typ == "apps":
+                    await self._envoyer(ws, {"type": "apps", "apps": self.r["apps"]()})
+                elif typ in ("app_ajout", "app_retrait"):
+                    if typ == "app_ajout":
+                        ok, texte = await boucle.run_in_executor(
+                            None, self.r["ajouter_app"], str(m.get("nom", "")),
+                            str(m.get("cible", "")), str(m.get("sorte", "")))
+                    else:
+                        ok, texte = await boucle.run_in_executor(
+                            None, self.r["retirer_app"], str(m.get("nom", "")))
+                    await self._envoyer(ws, {"type": "rep", "ligne": typ, "texte": texte, "ok": ok})
                     await self._envoyer(ws, {"type": "apps", "apps": self.r["apps"]()})
                 elif typ == "cmd":
                     ligne = str(m.get("ligne", ""))[:200]

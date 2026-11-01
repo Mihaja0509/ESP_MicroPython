@@ -165,16 +165,17 @@ class BoutonAction extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 6),
+          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 4),
           child: Column(
             mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Icon(icone, color: couleur, size: 26),
               const SizedBox(height: 6),
               Text(
                 texte,
                 textAlign: TextAlign.center,
-                maxLines: 2,
+                softWrap: true,
                 style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Couleurs.doux),
               ),
             ],
@@ -182,5 +183,33 @@ class BoutonAction extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// Grille de boutons dont la hauteur s'adapte au texte (jamais de débordement,
+/// même avec une grande taille de police sur le téléphone).
+class GrilleBoutons extends StatelessWidget {
+  final int colonnes;
+  final List<Widget> enfants;
+  final double espace;
+
+  const GrilleBoutons({super.key, required this.colonnes, required this.enfants, this.espace = 10});
+
+  @override
+  Widget build(BuildContext context) {
+    final lignes = <Widget>[];
+    for (var i = 0; i < enfants.length; i += colonnes) {
+      final cellules = <Widget>[];
+      for (var j = 0; j < colonnes; j++) {
+        if (j > 0) cellules.add(SizedBox(width: espace));
+        final k = i + j;
+        cellules.add(Expanded(child: k < enfants.length ? enfants[k] : const SizedBox()));
+      }
+      if (lignes.isNotEmpty) lignes.add(SizedBox(height: espace));
+      lignes.add(IntrinsicHeight(
+        child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: cellules),
+      ));
+    }
+    return Column(children: lignes);
   }
 }
