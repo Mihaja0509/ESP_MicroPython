@@ -1,6 +1,6 @@
 # État du code — Micro
 
-Mis à jour : 2026-11-01 (fin de Phase 5 : app Flutter, serveur WebSocket, écran plus fluide)
+Mis à jour : 2026-11-01 (fin de Phase 5-bis : app Dadou et son icône)
 
 ## Arborescence
 
@@ -592,6 +592,106 @@ Running Gradle task 'assembleRelease'...                          286,4s
 
 - APK : `app\build\app\outputs\flutter-apk\app-release.apk`, **54 172 607 octets** (51,7 Mo).
 - Signée avec la clé debug (`signingConfig = signingConfigs.getByName("debug")` dans `app/android/app/build.gradle.kts`, inchangé).
+
+## App Dadou et icône (Phase 5-bis)
+
+- Zip `docs/micro_phase5_fichiers.zip` (v2, SHA-256 `53c7edd0065cc53fa50a26f4c42dcafdc8e9bdfe58b6a46aeeb00232c7d1e71e`) extrait par-dessus la Phase 5 v1 : seuls `tools/assets/generer_icone.py`, `app/assets/icone/icone.png`, `icone_avant.png`, `icone_fond.png` (nouveaux), `app/pubspec.yaml` et `app/lib/main.dart` (modifiés) ont changé.
+- Manifeste : `android:label="Télécommande PC"` → `android:label="Dadou"`.
+- `py -m py_compile tools\assets\generer_icone.py` : aucune erreur.
+
+```
+> flutter pub get
+Resolving dependencies...
+Downloading packages...
+  cli_util 0.4.2 (0.6.0 available)
+  cupertino_icons 1.0.9 (2.0.0 available)
+  material_color_utilities 0.13.0 (0.13.1 available)
+  meta 1.18.3 (1.19.0 available)
+  shared_preferences_foundation 2.5.7 (2.6.1 available)
+  test_api 0.7.12 (0.7.15 available)
+  vector_math 2.4.2 (2.4.4 available)
+Got dependencies!
+7 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+```
+
+```
+> dart run flutter_launcher_icons
+  ════════════════════════════════════════════
+     FLUTTER LAUNCHER ICONS (v0.14.4)
+  ════════════════════════════════════════════
+
+• Creating default icons Android
+• Creating adaptive icons Android
+• Overwriting the default Android launcher icon with a new icon
+• Creating mipmap xml file Android
+No platform provided
+
+✓ Successfully generated launcher icons
+```
+
+Fichiers d'icônes générés dans `app/android/app/src/main/res/` (taille en octets) :
+
+```
+    7636  mipmap-hdpi/ic_launcher.png                    (remplacé)
+    3962  mipmap-mdpi/ic_launcher.png                    (remplacé)
+   12046  mipmap-xhdpi/ic_launcher.png                   (remplacé)
+   23573  mipmap-xxhdpi/ic_launcher.png                  (remplacé)
+   36695  mipmap-xxxhdpi/ic_launcher.png                 (remplacé)
+    4890  drawable-mdpi/ic_launcher_background.png       (nouveau)
+   10708  drawable-mdpi/ic_launcher_foreground.png       (nouveau)
+    8705  drawable-hdpi/ic_launcher_background.png       (nouveau)
+   21594  drawable-hdpi/ic_launcher_foreground.png       (nouveau)
+   12431  drawable-xhdpi/ic_launcher_background.png      (nouveau)
+   33167  drawable-xhdpi/ic_launcher_foreground.png      (nouveau)
+   22304  drawable-xxhdpi/ic_launcher_background.png     (nouveau)
+   63872  drawable-xxhdpi/ic_launcher_foreground.png     (nouveau)
+   35341  drawable-xxxhdpi/ic_launcher_background.png    (nouveau)
+  103545  drawable-xxxhdpi/ic_launcher_foreground.png    (nouveau)
+     338  mipmap-anydpi-v26/ic_launcher.xml              (nouveau)
+```
+
+`mipmap-anydpi-v26/ic_launcher.xml` :
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+  <background android:drawable="@drawable/ic_launcher_background"/>
+  <foreground>
+      <inset
+          android:drawable="@drawable/ic_launcher_foreground"
+          android:inset="16%" />
+  </foreground>
+</adaptive-icon>
+```
+
+L'outil n'a pas modifié le manifeste (seul le label a changé, à la main).
+
+```
+> flutter analyze
+Analyzing app...
+No issues found! (ran in 2.9s)
+```
+
+Aucune erreur, aucun avertissement, aucune « info ».
+
+```
+> flutter test
+00:00 +0: loading D:/FlutterProject/Esp32Maison/Micro/app/test/widget_test.dart
+00:00 +0: lecture de l'état envoyé par le PC
+00:00 +1: état vide
+00:00 +2: All tests passed!
+```
+
+```
+> flutter build apk --release
+Running Gradle task 'assembleRelease'...
+Font asset "MaterialIcons-Regular.otf" was tree-shaken, reducing it from 1645184 to 8776 bytes (99.5% reduction). Tree-shaking can be disabled by providing the --no-tree-shake-icons flag when building your app.
+Running Gradle task 'assembleRelease'...                           56,4s
+√ Built build\app\outputs\flutter-apk\app-release.apk (52.0MB)
+```
+
+- APK : `app\build\app\outputs\flutter-apk\app-release.apk`, **54 546 501 octets** (52,0 Mo), signée avec la clé debug.
 
 ## esp/main.py
 
@@ -1984,11 +2084,11 @@ if __name__ == "__main__":
     main()
 ```
 
-## app/pubspec.yaml (Phase 5)
+## app/pubspec.yaml (Phase 5-bis)
 
 ```yaml
 name: esp_micro
-description: "Télécommande PC — app de l'ESP32 Maison (projet Micro)."
+description: "Dadou — télécommande du PC, app de l'ESP32 Maison (projet Micro)."
 publish_to: 'none'
 
 version: 1.0.0+1
@@ -2007,6 +2107,15 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
+
+# Icône de l'app (dart run flutter_launcher_icons) — images créées par tools/assets/generer_icone.py
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/icone/icone.png"
+  adaptive_icon_background: "assets/icone/icone_fond.png"
+  adaptive_icon_foreground: "assets/icone/icone_avant.png"
 
 flutter:
   uses-material-design: true
@@ -2028,56 +2137,19 @@ flutter:
           weight: 900
 ```
 
-## app/android/app/src/main/AndroidManifest.xml (Phase 5)
+## app/android/app/src/main/AndroidManifest.xml (Phase 5-bis, 10 premières lignes)
 
 ```xml
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET"/>
     <application
-        android:label="Télécommande PC"
+        android:label="Dadou"
         android:usesCleartextTraffic="true"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:launchMode="singleTop"
-            android:taskAffinity=""
-            android:theme="@style/LaunchTheme"
-            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
-            android:hardwareAccelerated="true"
-            android:windowSoftInputMode="adjustResize">
-            <!-- Specifies an Android theme to apply to this Activity as soon as
-                 the Android process has started. This theme is visible to the user
-                 while the Flutter UI initializes. After that, this theme continues
-                 to determine the Window background behind the Flutter UI. -->
-            <meta-data
-              android:name="io.flutter.embedding.android.NormalTheme"
-              android:resource="@style/NormalTheme"
-              />
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN"/>
-                <category android:name="android.intent.category.LAUNCHER"/>
-            </intent-filter>
-        </activity>
-        <!-- Don't delete the meta-data below.
-             This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
-        <meta-data
-            android:name="flutterEmbedding"
-            android:value="2" />
-    </application>
-    <!-- Required to query activities that can process text, see:
-         https://developer.android.com/training/package-visibility and
-         https://developer.android.com/reference/android/content/Intent#ACTION_PROCESS_TEXT.
-
-         In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
-    <queries>
-        <intent>
-            <action android:name="android.intent.action.PROCESS_TEXT"/>
-            <data android:mimeType="text/plain"/>
-        </intent>
-    </queries>
-</manifest>
 ```
 
 ## hid.py installé

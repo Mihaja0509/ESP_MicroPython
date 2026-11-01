@@ -4,7 +4,7 @@ Projet séparé de `..\firmware` et `..\app` (projet clim, en pause).
 
 - Carte : Waveshare **ESP32-S3-LCD-1.47** seule (ESP32-S3R8, 8 Mo PSRAM octal, 16 Mo flash, USB natif, écran ST7789 172×320), **sans module externe**.
 - `esp/` : code MicroPython copié sur la carte (`main.py` à la racine, `lib/` dans le dossier `lib` de la carte).
-- `app/` : app Dart/Flutter Android (`com.mmdigitek.esp_micro`, nom affiché « Télécommande PC »).
+- `app/` : app Dart/Flutter Android (`com.mmdigitek.esp_micro`, nom affiché « Dadou »).
 - `docs/` : documents de phase et état du code (à appliquer exactement).
 - `bin/` : firmware MicroPython téléchargé (ignoré par Git).
 - Dépôt : https://github.com/Mihaja0509/ESP_MicroPython.git
@@ -12,7 +12,7 @@ Projet séparé de `..\firmware` et `..\app` (projet clim, en pause).
 ## Architecture (Phase 5)
 
 ```
-App Android ⇄ WebSocket (port 8765) ⇄ agent PC (agent_pc.py + serveur_app.py) ⇄ USB série (COM4) ⇄ ESP32
+App Android « Dadou » ⇄ WebSocket (port 8765) ⇄ agent PC (agent_pc.py + serveur_app.py) ⇄ USB série (COM4) ⇄ ESP32
 ```
 
 - L'ESP32 n'a pas de Wi-Fi utilisable (box en 5 GHz) : tout passe par l'agent PC.
@@ -29,6 +29,7 @@ App Android ⇄ WebSocket (port 8765) ⇄ agent PC (agent_pc.py + serveur_app.py
 - `assets/images/perso_*.png` (8, exportées par `tools\assets\generer_assets.py`), `assets/fonts/Inter-*.otf` (4) + licence.
 - `test/widget_test.dart` (2 tests). Dépendances : `web_socket_channel`, `shared_preferences`.
 - Manifeste : permission `INTERNET`, `usesCleartextTraffic="true"` (WebSocket `ws://` en clair, protégé par Tailscale + appairage).
+- Icône (visage de la mascotte qui rit, icône adaptative) : `py tools\assets\generer_icone.py` crée `app/assets/icone/icone.png`, `icone_avant.png`, `icone_fond.png` ; puis dans `app/` : `dart run flutter_launcher_icons` (réglages dans `pubspec.yaml`) génère `android/app/src/main/res/mipmap-*/ic_launcher.png`, `drawable-*/ic_launcher_background.png` / `ic_launcher_foreground.png` et `mipmap-anydpi-v26/ic_launcher.xml`.
 - APK release (signée avec la clé debug) : `app\build\app\outputs\flutter-apk\app-release.apk`.
 
 ## Brochage de la carte (Waveshare)
@@ -75,6 +76,7 @@ Agent PC (`tools\agent\agent_pc.py`) : il occupe le port COM4 tant qu'il tourne.
 
 Dans `app/` :
 - `flutter pub get`
+- `dart run flutter_launcher_icons` : régénérer les icônes Android (après `generer_icone.py`)
 - `flutter analyze`
 - `flutter test`
 - `flutter build apk --release` (ou `--debug`) ; `flutter install` avec le téléphone branché (débogage USB)

@@ -1,16 +1,16 @@
-# Micro — Phase 5 : l'app Flutter « Télécommande PC » + écran plus fluide
+# Micro — Phase 5 (version 2) : l'app Flutter « Dadou » + icône + écran plus fluide
 
 - Date : 2026-11-01
-- Statut : à appliquer
+- Statut : à appliquer (remplace la version 1, jamais appliquée)
 - Étape : « Télécommande PC » — étape 5 (app Flutter, accès de partout avec Tailscale)
 - Basée sur : fin de Phase 4 (fichiers du zip de la Phase 4, appliqués exactement) ; app = squelette `flutter create` non modifié
-- Livraison : **`docs/micro_phase5_fichiers.zip`** (37 entrées). SHA-256 : `0f39029351fe2dcd4dd24c78fff2f385409e65cb1013cae6aac8c374c9eae5c4`
+- Livraison : **`docs/micro_phase5_fichiers.zip`** (42 entrées). SHA-256 : `53c7edd0065cc53fa50a26f4c42dcafdc8e9bdfe58b6a46aeeb00232c7d1e71e`
 
 ## Ce que contient la phase
 
 **Architecture** : téléphone (app) ⇄ WebSocket (port 8765) ⇄ **programme PC** ⇄ USB ⇄ ESP32. L'ESP32 n'a pas besoin de Wi-Fi (box en 5 GHz). De partout grâce à **Tailscale** (réseau privé gratuit entre le PC et le téléphone).
 
-**App Android (Flutter)**, même style que l'écran de l'ESP32 (dégradé crépuscule, cartes « verre », police Inter, ta mascotte) ; le fond passe en **néon** pendant un jeu et en **nuit** quand le PC est verrouillé ou hors ligne :
+**App Android « Dadou »** (Flutter), avec son **icône** (le visage de la mascotte qui rit sur un fond crépuscule étoilé, icône adaptative Android), même style que l'écran de l'ESP32 (dégradé crépuscule, cartes « verre », police Inter, ta mascotte) ; le fond passe en **néon** pendant un jeu et en **nuit** quand le PC est verrouillé ou hors ligne :
 - **Accueil** : ta mascotte animée (respire, cligne, sourit après une commande, casque sur les oreilles avec un casque ou en jeu, dort si le PC est verrouillé), heure, état ; en jeu : nom du jeu, **gros FPS**, barres de température CPU/GPU ; anneaux CPU / RAM / GPU animés, batterie, volume, températures, casque ; météo ; actions rapides (verrouiller, éteindre l'écran, écran ESP32, bureau).
 - **Souris** : grand **pavé tactile** (glisser = bouger, toucher = clic, appui long ou toucher à deux doigts = clic droit, deux doigts = défiler, réglage de vitesse), boutons clic gauche / droit, **clavier** (le texte tapé est écrit sur le PC, accents compris) et touches rapides (Entrée, Échap, ⌫, Tab, flèches, Alt+Tab, Ctrl+C/V/Z, Win, F5, F11).
 - **Contrôles** : volume (curseur + muet + précédent / lecture / suivant), luminosité, **lanceur d'apps** (liste de apps.json), alimentation (verrouiller, éteindre l'écran, veille et arrêt avec confirmation, annuler l'arrêt, écran ESP32).
@@ -40,12 +40,14 @@
 | `app/lib/etat.dart`, `connexion.dart`, `theme.dart`, `ecrans/*.dart` (4), `widgets/*.dart` (2) | **nouveaux** |
 | `app/assets/images/perso_*.png` (8) | **nouveaux** (mascotte en grand) |
 | `app/assets/fonts/Inter-*.otf` (4) + `LICENCE_POLICES.txt` | **nouveaux** (polices, SIL OFL 1.1) |
+| `app/assets/icone/icone.png`, `icone_avant.png`, `icone_fond.png` | **nouveaux** (icône 1024 px + couches de l'icône adaptative) |
+| `tools/assets/generer_icone.py` | **nouveau** (programme qui a créé l'icône) |
 
 Les fichiers de `esp/assets/` ne changent pas.
 
 ## Partie 3 — Modification « avant → après »
 
-### Modification 1 — `app/android/app/src/main/AndroidManifest.xml` (accès réseau + nom de l'app)
+### Modification 1 — `app/android/app/src/main/AndroidManifest.xml` (accès réseau + nom de l'app « Dadou »)
 
 Avant :
 
@@ -61,7 +63,7 @@ Après :
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET"/>
     <application
-        android:label="Télécommande PC"
+        android:label="Dadou"
         android:usesCleartextTraffic="true"
 ```
 
@@ -87,6 +89,7 @@ Après :
 | `pc_test.py COM4 --cmd "EVT PIN 123456"` puis `--cmd "EVT APP 1"` | « OK » ×2 |
 | Dans `app` : `flutter pub get` | réussi |
 | `flutter analyze` | **aucune erreur** (les « info » de style sont acceptées : les lister sans les corriger) |
+| `dart run flutter_launcher_icons` (dans app) | icônes Android générées (mipmap-*/ic_launcher.png, mipmap-anydpi-v26/ic_launcher.xml…) |
 | `flutter test` | 2 tests réussis |
 | `flutter build apk --release` | APK construit (noter le chemin et la taille) |
 
@@ -103,6 +106,7 @@ En cas d'**erreur** de compilation Dart : ne rien corriger, copier les messages 
 
 ## Tests sur l'appareil (par Mihaja)
 
+0. **Icône et nom** : sur le téléphone, l'app s'appelle « Dadou » avec le visage de la mascotte qui rit.
 1. **Appairage** : le code s'affiche sur l'ESP32 (bandeau 60 s) ; après validation, l'ESP32 affiche « Téléphone connecté » et l'app passe sur « Connecté ».
 2. **Accueil** : la mascotte bouge, les anneaux CPU / RAM / GPU suivent le PC ; l'écran de l'ESP32 est plus vif (valeurs qui glissent, 4 mises à jour par seconde).
 3. **Souris** : le curseur suit ton doigt sans à-coups ; toucher = clic ; deux doigts = défilement dans une page web ; appui long = clic droit.

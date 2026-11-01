@@ -1,4 +1,4 @@
-// Télécommande PC — app Flutter de l'ESP32 Maison (projet Micro).
+// Dadou — télécommande du PC, app Flutter de l'ESP32 Maison (projet Micro).
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -24,7 +24,7 @@ class TelecommandeApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Télécommande PC',
+      title: 'Dadou',
       debugShowCheckedModeBanner: false,
       theme: creerTheme(),
       home: const Accueil(),
