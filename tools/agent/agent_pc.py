@@ -27,6 +27,7 @@ import subprocess
 import sys
 import threading
 import time
+import unicodedata
 import urllib.request
 from pathlib import Path
 
@@ -181,6 +182,21 @@ def volume():
         return round(_volume_endpoint().GetMasterVolumeLevelScalar() * 100)
     except Exception:
         return -1
+
+
+def texte_ascii(texte, defaut=""):
+    """Enlève accents et caractères non latins (l'écran de l'ESP32 ne les connaît pas).
+    Ex. « God of War Ragnarök » -> « God of War Ragnarok »."""
+    t = unicodedata.normalize("NFKD", texte).encode("ascii", "ignore").decode("ascii")
+    t = " ".join(t.split())
+    return t or defaut
+
+
+def nom_court_audio(nom):
+    """« Headphones (Xiaomi蓝牙音箱Pro) » -> « XiaomiPro » ; « Speakers (HECATE G30) » -> « HECATE G30 »."""
+    if "(" in nom and nom.endswith(")"):
+        nom = nom[nom.index("(") + 1:-1]
+    return texte_ascii(nom, "Casque")
 
 
 def _appareil_defaut():
@@ -344,6 +360,7 @@ class CompteurFPS:
         self.noms = {}        # pid -> nom de l'exe
         self.verrou = threading.Lock()
         self.probleme = ""
+        self.entete = ""
 
     def exe(self):
         trouves = sorted(glob.glob(str(DOSSIER / "bin" / "PresentMon*.exe")))
@@ -354,6 +371,14 @@ class CompteurFPS:
         if chemin is None:
             self.probleme = "PresentMon absent de tools\\agent\\bin"
             return False
+        # Un PresentMon d'un ancien agent peut encore tourner et garder la session : on l'arrête.
+        for p in psutil.process_iter(["name"]):
+            try:
+                if (p.info["name"] or "").lower().startswith("presentmon"):
+                    p.kill()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+        time.sleep(1)
         cmd = [chemin, "--output_stdout", "--no_console_stats", "--v1_metrics",
                "--stop_existing_session", "--session_name", "ESP32Telecommande"]
         try:
@@ -373,21 +398,32 @@ class CompteurFPS:
 
     def _lire(self):
         col = None
+        lignes_avant_entete = 0
         for ligne in self.proc.stdout:
-            morceaux = ligne.strip().split(",")
+            morceaux = [m.strip() for m in ligne.strip().split(",")]
             if col is None:
-                if "ProcessID" in morceaux and "MsBetweenPresents" in morceaux:
-                    col = {nom: morceaux.index(nom) for nom in
-                           ("Application", "ProcessID", "SwapChainAddress", "MsBetweenPresents")
-                           if nom in morceaux}
+                bas = [m.lower() for m in morceaux]
+                # Les noms de colonnes changent selon les versions (msBetweenPresents,
+                # MsBetweenPresents, FrameTime…) : on compare sans tenir compte des majuscules.
+                duree = next((n for n in ("msbetweenpresents", "frametime", "msbetweenappstart")
+                              if n in bas), None)
+                if "processid" in bas and duree is not None:
+                    col = {"pid": bas.index("processid"), "ms": bas.index(duree),
+                           "app": bas.index("application") if "application" in bas else None,
+                           "chaine": bas.index("swapchainaddress")
+                           if "swapchainaddress" in bas else None}
+                    self.entete = ligne.strip()[:200]
+                    self.probleme = ""
                 else:
-                    self.probleme = "PresentMon : " + ligne.strip()[:120]
+                    lignes_avant_entete += 1
+                    if lignes_avant_entete == 1 or lignes_avant_entete == 50:
+                        self.probleme = "PresentMon (en-tête non trouvé) : " + ligne.strip()[:150]
                 continue
             try:
-                pid = int(morceaux[col["ProcessID"]])
-                ms = float(morceaux[col["MsBetweenPresents"]])
-                chaine = morceaux[col["SwapChainAddress"]] if "SwapChainAddress" in col else ""
-                app = morceaux[col["Application"]].lower() if "Application" in col else ""
+                pid = int(morceaux[col["pid"]])
+                ms = float(morceaux[col["ms"]])
+                chaine = morceaux[col["chaine"]] if col["chaine"] is not None else ""
+                app = morceaux[col["app"]].lower() if col["app"] is not None else ""
             except (ValueError, IndexError):
                 continue
             if ms <= 0:
@@ -618,10 +654,10 @@ class Agent:
 
             nom, externe = sortie_audio()
             etats = {
-                "CASQUE": nom if externe else "-",
+                "CASQUE": nom_court_audio(nom) if externe else "-",
                 "MANETTE": "1" if manette_connectee() else "0",
                 "VERROU": "1" if pc_verrouille() else "0",
-                "JEU": jeu_steam() or "-",
+                "JEU": texte_ascii(jeu_steam(), "Jeu") if jeu_steam() else "-",
             }
             for cle, valeur in etats.items():
                 if self.precedent.get(cle) != valeur:
@@ -661,6 +697,7 @@ class Agent:
                 break
             if ligne.upper() == "ETAT":
                 print(self.dernier_stat, self.dernier_gpu, self.dernier_perf, self.precedent)
+                print("Colonnes PresentMon :", self.fps.entete or "(pas encore reçues)")
                 print("LibreHardwareMonitor :", self.lhm.probleme or "OK",
                       "| PresentMon :", self.fps.probleme or "OK",
                       "| administrateur :", "oui" if est_admin() else "non")
