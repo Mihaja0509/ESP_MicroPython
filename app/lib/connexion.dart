@@ -99,6 +99,13 @@ class Connexion extends ChangeNotifier {
   bool pinAffiche = false;
   DateTime derniereAction = DateTime.fromMillisecondsSinceEpoch(0);
 
+  /// Aperçu de l'écran du PC (Phase 8) : à part, pour ne pas redessiner toute l'app à chaque image.
+  final ValueNotifier<Uint8List?> apercuImage = ValueNotifier(null);
+  final ValueNotifier<Map<String, dynamic>> apercuInfos = ValueNotifier(const {});
+
+  /// Appelé quand les favoris, l'adresse ou l'appairage changent (mise à jour du widget).
+  VoidCallback? surFavoris;
+
   WebSocketChannel? _canal;
   StreamSubscription<dynamic>? _abonnement;
   Timer? _reconnexion;
@@ -206,8 +213,8 @@ class Connexion extends ChangeNotifier {
     _reconnexion = Timer(Duration(milliseconds: _echecs <= 1 ? 500 : 3000), connecter);
   }
 
-  /// Point d'entrée pour les messages binaires (aperçu de l'écran, Phase 8).
-  void recevoirBinaire(Uint8List octets) {}
+  /// Messages binaires : images de l'aperçu de l'écran.
+  void recevoirBinaire(Uint8List octets) => apercuImage.value = octets;
 
   void _recevoir(dynamic brut) {
     if (brut is List<int>) {
@@ -267,19 +274,39 @@ class Connexion extends ChangeNotifier {
       case 'apps':
         final liste = m['apps'];
         if (liste is List) apps = liste.map(AppPc.depuis).where((a) => a.nom.isNotEmpty).toList();
+        favorisChanges(); // noms et icônes à jour dans le widget
       case 'raccourcis':
         final liste = m['raccourcis'];
         if (liste is List) {
           raccourcis = liste.map(Raccourci.depuis).where((r) => r.nom.isNotEmpty).toList();
         }
+        favorisChanges();
       default:
         if (!recevoirAutre(m)) return;
     }
     notifyListeners();
   }
 
-  /// Autres messages (Phase 8). Renvoie true si l'écran doit être redessiné.
-  bool recevoirAutre(Map<String, dynamic> m) => false;
+  /// Autres messages. Renvoie true si l'écran doit être redessiné.
+  bool recevoirAutre(Map<String, dynamic> m) {
+    switch (m['type']) {
+      case 'apercu_info':
+        apercuInfos.value = Map<String, dynamic>.from(m);
+      case 'apercu_erreur':
+        apercuInfos.value = {'erreur': (m['texte'] ?? 'Aperçu impossible').toString()};
+    }
+    return false;
+  }
+
+  // ------------------------------------------------------------- aperçu de l'écran
+  void demanderApercu({int ecran = 0, int largeur = 960, int qualite = 60}) =>
+      _envoyer({'type': 'apercu', 'ecran': ecran, 'largeur': largeur, 'qualite': qualite});
+
+  /// Place la souris à (x, y) (de 0 à 1) sur l'écran choisi, puis clique si [clic] n'est pas vide.
+  void pointeur(int ecran, double x, double y, String clic) {
+    derniereAction = DateTime.now();
+    _envoyer({'type': 'pointeur', 'ecran': ecran, 'x': x, 'y': y, 'clic': clic});
+  }
 
   void _annoncer(String texte) {
     if (texte.isEmpty) return;
@@ -406,8 +433,7 @@ class Connexion extends ChangeNotifier {
     });
   }
 
-  /// Appelé quand les favoris, l'adresse ou l'appairage changent (widget, Phase 8).
-  void favorisChanges() {}
+  void favorisChanges() => surFavoris?.call();
 
   /// Déplacement de souris : regroupé et envoyé environ 60 fois par seconde.
   void souris(double dx, double dy) {
@@ -443,6 +469,8 @@ class Connexion extends ChangeNotifier {
     _reconnexion?.cancel();
     _minuterieSouris?.cancel();
     _fermerCanal();
+    apercuImage.dispose();
+    apercuInfos.dispose();
     super.dispose();
   }
 }

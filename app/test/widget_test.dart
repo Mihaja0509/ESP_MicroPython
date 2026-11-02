@@ -56,6 +56,15 @@ void main() {
     expect((j['etapes'] as List).last, {'type': 'touches', 'valeur': 'ctrl+6'});
   });
 
+  test('Phase 8 : infos de l\'aperçu de l\'écran', () {
+    final cx = Connexion();
+    cx.recevoirAutre({'type': 'apercu_info', 'ecran': 1, 'ecrans': 2, 'largeur': 2560, 'hauteur': 1600});
+    expect(cx.apercuInfos.value['ecrans'], 2);
+    cx.recevoirAutre({'type': 'apercu_erreur', 'texte': 'Capture impossible'});
+    expect(cx.apercuInfos.value['erreur'], 'Capture impossible');
+    cx.dispose();
+  });
+
   test('favoris : retrouvés même hors ligne', () {
     final cx = Connexion();
     expect(resoudre(cx, 'cmd:PLAY').nom, 'Lecture / pause');

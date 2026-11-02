@@ -19,6 +19,8 @@
 - Phase 7 : « écran noir » sans veille (tous les écrans, le PC reste joignable), compte à
   rebours d'arrêt sur l'ESP32 (EVT ARRET), luminosité de l'ESP32 (LUM_ESP), raccourcis
   enregistrés depuis le téléphone (touches, texte, commande administrateur, app, pause…).
+- Phase 8 : aperçu de l'écran du PC dans l'app (capture JPEG à la demande, tous les écrans),
+  toucher l'aperçu = cliquer à cet endroit ; adresse /widget pour le widget Android.
 
 Utilisation (dans le dossier Micro) :
   py -X utf8 tools\\agent\\agent_pc.py            port trouvé tout seul, avec console
@@ -33,6 +35,7 @@ import base64
 import collections
 import ctypes
 import glob
+import io
 import json
 import os
 import queue
@@ -66,6 +69,12 @@ try:
     import pynvml  # paquet « nvidia-ml-py »
 except ImportError:
     pynvml = None
+
+try:  # aperçu de l'écran (Phase 8) : py -m pip install --user mss Pillow
+    import mss
+    from PIL import Image, ImageDraw
+except ImportError:
+    mss = None
 
 import winreg
 
@@ -1374,6 +1383,81 @@ def derouler_raccourci(r, executer):
 
 
 # --------------------------------------------------------------------------
+# Aperçu de l'écran (Phase 8)
+# --------------------------------------------------------------------------
+class _POINT(ctypes.Structure):
+    _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+
+
+def _ecrans_mss(sct):
+    """Écrans dans l'ordre de Windows (sct.monitors[0] = tous les écrans ensemble)."""
+    return sct.monitors[1:] or sct.monitors[:1]
+
+
+def _dessiner_curseur(img, x, y):
+    """Petite flèche blanche bordée de noir là où est la souris."""
+    t = max(14, img.width // 60)
+    pts = [(x, y), (x, y + t), (x + t * 0.28, y + t * 0.72), (x + t * 0.72, y + t * 0.72)]
+    d = ImageDraw.Draw(img)
+    d.polygon(pts, fill=(255, 255, 255), outline=(0, 0, 0))
+
+
+def capture_ecran(ecran=0, largeur=960, qualite=60):
+    """Capture un écran en JPEG pour le téléphone. Renvoie (octets, infos) ou (None, problème)."""
+    if mss is None:
+        return None, "Aperçu indisponible : il manque mss et Pillow sur le PC"
+    try:
+        with mss.mss() as sct:
+            ecrans = _ecrans_mss(sct)
+            i = max(0, min(len(ecrans) - 1, int(ecran)))
+            m = ecrans[i]
+            brut = sct.grab(m)
+        img = Image.frombytes("RGB", brut.size, brut.bgra, "raw", "BGRX")
+        w, h = brut.size
+        largeur = max(320, min(2560, int(largeur)))
+        echelle = 1.0
+        if w > largeur:
+            echelle = largeur / w
+            img = img.resize((largeur, max(1, round(h * echelle))), Image.BILINEAR)
+        pt = _POINT()
+        if ctypes.windll.user32.GetCursorPos(ctypes.byref(pt)):
+            cx, cy = pt.x - m["left"], pt.y - m["top"]
+            if 0 <= cx < w and 0 <= cy < h:
+                _dessiner_curseur(img, cx * echelle, cy * echelle)
+        sortie = io.BytesIO()
+        img.save(sortie, "JPEG", quality=max(20, min(90, int(qualite))))
+        infos = {"ecran": i, "ecrans": len(ecrans), "largeur": w, "hauteur": h,
+                 "verrou": pc_verrouille()}
+        return sortie.getvalue(), infos
+    except Exception as e:
+        return None, f"Capture impossible : {e}"
+
+
+def pointeur_pc(ecran, x, y, clic=""):
+    """Place la souris à (x, y) (de 0 à 1 sur l'écran choisi), puis clique si demandé."""
+    if mss is not None:
+        with mss.mss() as sct:
+            ecrans = _ecrans_mss(sct)
+            m = ecrans[max(0, min(len(ecrans) - 1, int(ecran)))]
+            gauche, haut, w, h = m["left"], m["top"], m["width"], m["height"]
+    else:
+        ecrans = moniteurs_windows()
+        gauche, haut, w, h = ecrans[max(0, min(len(ecrans) - 1, int(ecran)))]
+    x = max(0.0, min(1.0, float(x)))
+    y = max(0.0, min(1.0, float(y)))
+    INJECTION["t"] = time.time()
+    ctypes.windll.user32.SetCursorPos(gauche + round(x * (w - 1)), haut + round(y * (h - 1)))
+    if clic in ("gauche", "droit"):
+        time.sleep(0.02)
+        clic_pc(clic)
+    elif clic == "double":
+        time.sleep(0.02)
+        clic_pc("gauche")
+        time.sleep(0.06)
+        clic_pc("gauche")
+
+
+# --------------------------------------------------------------------------
 # Boucles
 # --------------------------------------------------------------------------
 class Agent:
@@ -1686,6 +1770,7 @@ class Agent:
             "afficher_pin": afficher_pin,
             "souris": souris_pc, "clic": clic_pc, "molette": molette_pc,
             "texte": texte, "connexion": connexion,
+            "apercu": capture_ecran, "pointeur": pointeur_pc,
         }
 
     def boucle_lecture(self):

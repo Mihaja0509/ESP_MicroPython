@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Fond du widget : dégradé crépuscule, comme l'app et l'écran de l'ESP32. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <corners android:radius="22dp" />
+    <gradient
+        android:angle="0"
+        android:endColor="#F07A2A6A"
+        android:centerColor="#F03A1A5E"
+        android:startColor="#F0140E30" />
+</shape>

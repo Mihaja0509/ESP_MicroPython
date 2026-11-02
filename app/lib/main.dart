@@ -4,10 +4,12 @@ import 'package:flutter/services.dart';
 
 import 'connexion.dart';
 import 'ecrans/accueil.dart';
+import 'ecrans/apercu.dart';
 import 'ecrans/controles.dart';
 import 'ecrans/reglages.dart';
 import 'ecrans/souris.dart';
 import 'theme.dart';
+import 'widget_android.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -47,6 +49,7 @@ class _AccueilState extends State<Accueil> {
   @override
   void initState() {
     super.initState();
+    _cx.surFavoris = () => majWidget(_cx);
     _cx.charger();
     _cx.addListener(_nouveauMessage);
   }
@@ -85,6 +88,7 @@ class _AccueilState extends State<Accueil> {
         final ecrans = [
           EcranAccueil(cx: _cx),
           EcranSouris(cx: _cx),
+          EcranApercu(cx: _cx, actif: _onglet == 2),
           EcranControles(cx: _cx),
           EcranReglages(cx: _cx),
         ];
@@ -98,6 +102,7 @@ class _AccueilState extends State<Accueil> {
               destinations: const [
                 NavigationDestination(icon: Icon(Icons.home_rounded), label: 'Accueil'),
                 NavigationDestination(icon: Icon(Icons.mouse_rounded), label: 'Souris'),
+                NavigationDestination(icon: Icon(Icons.monitor_rounded), label: 'Écran'),
                 NavigationDestination(icon: Icon(Icons.tune_rounded), label: 'Contrôles'),
                 NavigationDestination(icon: Icon(Icons.settings_rounded), label: 'Réglages'),
               ],

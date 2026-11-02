@@ -19,17 +19,27 @@ Messages (JSON, un par message) :
     {"type": "rac_ajout", "raccourci": {nom, icone, etapes: [...]}, "ancien": "nom avant"}
     {"type": "rac_retrait", "nom": "Prépa jeu"}
     (lancer un raccourci : {"type": "cmd", "ligne": "RAC Prépa jeu"})
+    {"type": "apercu", "ecran": 0, "largeur": 960, "qualite": 60}   une image de l'écran (Phase 8)
+    {"type": "pointeur", "ecran": 0, "x": 0.5, "y": 0.5, "clic": "gauche"|"droit"|"double"|""}
   PC -> téléphone
     {"type": "auth_requise"} {"type": "auth_ok", "token": "..."} {"type": "erreur", "texte": "..."}
     {"type": "pin_affiche"} {"type": "etat", ...} (4 fois / s) {"type": "rep", "ligne": ..., "texte": ...}
     {"type": "apps", "apps": [{"nom": ..., "cible": ..., "type": "web"|"chemin"|"autre"}, ...]}
     {"type": "raccourcis", "raccourcis": [{"nom": ..., "icone": ..., "etapes": [...]}, ...]}
+    {"type": "apercu_info", "ecran": 0, "ecrans": 1, "largeur": 2560, "hauteur": 1600, "verrou": false}
+    puis l'image JPEG en message binaire ; {"type": "apercu_erreur", "texte": "..."}
+
+Widget Android (Phase 8) : requête HTTP simple sur le même port, sans WebSocket :
+  GET /widget?ligne=PLAY   avec l'en-tête « X-Token: <token du téléphone> »
+  -> texte de la réponse (comme dans la console), 401 si le téléphone n'est pas appairé.
 """
 import asyncio
 import json
 import secrets as aleatoire
 import threading
 import time
+import urllib.parse
+from http import HTTPStatus
 from pathlib import Path
 
 from websockets.asyncio.server import serve
@@ -46,7 +56,9 @@ class ServeurApp:
         ajouter_app(nom, cible, sorte) -> (ok, texte), retirer_app(nom) -> (ok, texte),
         raccourcis() -> list, ajouter_raccourci(dict, ancien) -> (ok, texte),
         retirer_raccourci(nom) -> (ok, texte),
-        souris(dx, dy), clic(bouton), molette(n), texte(t), connexion(nb_telephones)."""
+        souris(dx, dy), clic(bouton), molette(n), texte(t), connexion(nb_telephones),
+        apercu(ecran, largeur, qualite) -> (octets, infos) | (None, problème),
+        pointeur(ecran, x, y, clic)."""
         self.fichier = Path(fichier_appareils)
         self.r = rappels
         self.pin = None
@@ -103,9 +115,42 @@ class ServeurApp:
 
     async def _principal(self):
         async with serve(self._client, "0.0.0.0", PORT, ping_interval=20, ping_timeout=20,
-                         max_size=65536):
+                         max_size=65536, process_request=self._http):
             print(f"[agent] serveur app prêt sur le port {PORT}")
             await asyncio.Future()
+
+    async def _http(self, connexion, requete):
+        """Requêtes HTTP simples (widget Android). None = on continue en WebSocket."""
+        morceaux = urllib.parse.urlsplit(requete.path)
+        if morceaux.path != "/widget":
+            return None
+        if not self.token_valide(requete.headers.get("X-Token", "")):
+            return connexion.respond(HTTPStatus.UNAUTHORIZED, "Non autorisé\n")
+        ligne = (urllib.parse.parse_qs(morceaux.query).get("ligne") or [""])[0].strip()[:200]
+        if not ligne:
+            return connexion.respond(HTTPStatus.BAD_REQUEST, "Commande vide\n")
+        boucle = asyncio.get_running_loop()
+        try:
+            texte = await boucle.run_in_executor(None, self.r["executer"], ligne)
+        except Exception as e:
+            texte = f"Erreur : {e}"
+        return connexion.respond(HTTPStatus.OK, (texte or "OK") + "\n")
+
+    async def _apercu(self, ws, m, etat):
+        """Capture puis envoie une image (une seule à la fois par téléphone)."""
+        try:
+            octets, infos = await asyncio.get_running_loop().run_in_executor(
+                None, self.r["apercu"], int(m.get("ecran", 0)), int(m.get("largeur", 960)),
+                int(m.get("qualite", 60)))
+            if octets is None:
+                await self._envoyer(ws, {"type": "apercu_erreur", "texte": infos})
+            else:
+                await self._envoyer(ws, {"type": "apercu_info", **infos})
+                await ws.send(octets)
+        except Exception:
+            pass
+        finally:
+            etat["apercu"] = False
 
     async def _envoyer(self, ws, donnees):
         await ws.send(json.dumps(donnees, ensure_ascii=False))
@@ -119,6 +164,7 @@ class ServeurApp:
         boucle = asyncio.get_running_loop()
         authentifie = False
         tache_etat = None
+        etat_client = {"apercu": False}
         await self._envoyer(ws, {"type": "auth_requise"})
         try:
             async for brut in ws:
@@ -181,6 +227,14 @@ class ServeurApp:
                             None, self.r["retirer_raccourci"], str(m.get("nom", "")))
                     await self._envoyer(ws, {"type": "rep", "ligne": typ, "texte": texte, "ok": ok})
                     await self._envoyer(ws, {"type": "raccourcis", "raccourcis": self.r["raccourcis"]()})
+                elif typ == "apercu":
+                    if not etat_client["apercu"]:  # sinon on attend la fin de l'image en cours
+                        etat_client["apercu"] = True
+                        asyncio.create_task(self._apercu(ws, m, etat_client))
+                elif typ == "pointeur":
+                    await boucle.run_in_executor(
+                        None, self.r["pointeur"], int(m.get("ecran", 0)), float(m.get("x", 0)),
+                        float(m.get("y", 0)), str(m.get("clic", "")))
                 elif typ == "cmd":
                     ligne = str(m.get("ligne", ""))[:200]
                     texte = await boucle.run_in_executor(None, self.r["executer"], ligne)

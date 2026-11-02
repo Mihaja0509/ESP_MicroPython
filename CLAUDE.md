@@ -82,6 +82,11 @@ Agent PC (`tools\agent\agent_pc.py`) : il occupe le port COM4 tant qu'il tourne.
 - Raccourcis : `tools\agent\raccourcis.json` (créés depuis l'app ; étapes `touches`, `texte`, `entree`, `commande` (PowerShell / cmd, en administrateur, visible ou cachée), `app`, `pause`, `action`). WebSocket : `raccourcis`, `rac_ajout {raccourci, ancien}`, `rac_retrait {nom}`.
 - `raccourcis.json` et `preferences.json` ne sont pas commités.
 
+## Phase 8 : aperçu de l'écran et widget Android
+
+- Aperçu : l'agent capture l'écran à la demande (`mss` + `Pillow` : `py -m pip install --user mss Pillow`), JPEG envoyé en message binaire après `apercu_info`. WebSocket : `apercu {ecran, largeur, qualite}`, `pointeur {ecran, x, y, clic}` (x, y de 0 à 1). L'écran noir est exclu de la capture.
+- Widget Android : `android/app/src/main/kotlin/com/mmdigitek/esp_micro/DadouWidget.kt` + `res/layout/widget_dadou.xml`, `res/xml/widget_dadou_info.xml`, `res/drawable/w_*.xml`. Il affiche les 4 premiers favoris (préférence `widget_boutons`, écrite par `lib/widget_android.dart`) et envoie `GET /widget?ligne=…` avec l'en-tête `X-Token` (même port 8765, géré par `serveur_app.py`).
+
 Dans `app/` :
 - `flutter pub get`
 - `dart run flutter_launcher_icons` : régénérer les icônes Android (après `generer_icone.py`)
