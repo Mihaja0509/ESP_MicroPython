@@ -74,6 +74,14 @@ Agent PC (`tools\agent\agent_pc.py`) : il occupe le port COM4 tant qu'il tourne.
 - `ECRAN_ESP 0|1` : éteindre / rallumer l'écran de l'ESP32.
 - `METEO` : relire la météo gardée (`OK orage 32/24 pluie 80% vers 15h | …`).
 
+## Phase 7 : arrêt propre, écran noir, raccourcis
+
+- Série PC → ESP32 : `EVT ARRET n` (compte à rebours n s ; `0` = annulé ; `-1` = Windows s'éteint maintenant), `LUM_ESP 5..100` (luminosité choisie dans l'app ; l'agent la garde dans `tools\agent\preferences.json` et la renvoie à chaque connexion).
+- L'ESP32 démarre écran noir (rétroéclairage 0) et reste noir tant que le PC ne parle pas et que l'heure est inconnue, ou après un arrêt annoncé. Plus de flash gris quand le port USB du portable éteint coupe / remet le courant.
+- Agent : `ECRAN_OFF` / `ECRAN_ON` / `ECRAN_BASCULE` = « écran noir » (fenêtre noire sur chaque écran + luminosité 0 + Windows empêché de dormir), **sans** verrouiller ni mettre en veille ; le vrai clavier / la vraie souris du PC le rallument. `VEILLE` = verrou + écran coupé (seule veille possible : S0 moderne). `TOUCHES ctrl+6` = touches envoyées par Windows (disposition du clavier respectée). `RAC nom` = raccourci.
+- Raccourcis : `tools\agent\raccourcis.json` (créés depuis l'app ; étapes `touches`, `texte`, `entree`, `commande` (PowerShell / cmd, en administrateur, visible ou cachée), `app`, `pause`, `action`). WebSocket : `raccourcis`, `rac_ajout {raccourci, ancien}`, `rac_retrait {nom}`.
+- `raccourcis.json` et `preferences.json` ne sont pas commités.
+
 Dans `app/` :
 - `flutter pub get`
 - `dart run flutter_launcher_icons` : régénérer les icônes Android (après `generer_icone.py`)

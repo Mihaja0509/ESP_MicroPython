@@ -1,7 +1,10 @@
-# Phase 4 : Télécommande PC avec écran animé.
+# Télécommande PC avec écran animé (Phase 7).
 # - Les ordres et les données arrivent du PC par le port série USB (une ligne par message).
 # - L'ESP32 joue le rôle de clavier + souris + touches multimédia (hid_pc.py).
 # - L'écran est dessiné par ui.py environ 12 fois par seconde.
+# - Phase 7 : compte à rebours quand le PC s'éteint (EVT ARRET n), écran complètement noir
+#   quand le PC est éteint (et au démarrage de la carte tant que le PC ne parle pas),
+#   luminosité réglable depuis l'app (LUM_ESP n).
 import select
 import sys
 import time
@@ -27,7 +30,11 @@ stat = {"cpu": -1, "ram": -1, "vol": -1, "bat": -1, "chg": 0}
 gpu = {"temp": -1, "charge": -1, "vram": -1}
 perf = {"cpu_temp": -1, "fps": -1}
 evt = {"casque": "", "manette": 0, "verrou": 0, "jeu": ""}
-etat = {"connecte": False, "stat": stat, "gpu": gpu, "perf": perf, "evt": evt, "meteo": []}
+etat = {"connecte": False, "stat": stat, "gpu": gpu, "perf": perf, "evt": evt, "meteo": [],
+        "eteint": True,        # écran noir : PC éteint (ou carte qui vient de démarrer sans PC)
+        "arret_fin": None,     # ticks de la fin du compte à rebours d'arrêt (None = pas d'arrêt)
+        "arret_total": 60000,  # durée du compte à rebours (ms), pour la barre
+        "lum": 85}             # luminosité choisie dans l'app (5 à 100)
 
 ATTENTE_ABSENT = 12000     # sans données depuis 12 s = PC éteint / en veille / agent arrêté
 RETOUR_PC = 5000           # il faut 5 s de données sans coupure pour dire « le PC est revenu »
@@ -39,6 +46,15 @@ ecran_allume = True
 luminosite_actuelle = -1
 
 
+def heure_connue():
+    return time.localtime()[0] >= 2025  # avant le 1er « TEMPS » du PC, l'horloge est en 2000
+
+
+def majuscule(texte):
+    """Première lettre en majuscule (str.capitalize n'existe pas en MicroPython)."""
+    return texte[:1].upper() + texte[1:] if texte else texte
+
+
 def noter_erreur(e):
     """Garde la trace d'une erreur dans erreur.txt (sur la carte) sans arrêter le programme."""
     try:
@@ -48,7 +64,7 @@ def noter_erreur(e):
         pass
 
 
-# Premier dessin tout de suite (écran « Bonjour »), puis déclaration du clavier/souris au PC
+# Premier dessin tout de suite (écran noir tant que le PC ne parle pas), puis clavier/souris
 ui.dessiner(etat, time.ticks_ms())
 meteo = Meteo(reglages)  # lance la connexion Wi-Fi (sans attendre)
 try:
@@ -67,7 +83,13 @@ def lire_ligne():
     Les caractères bizarres (parasites au démarrage du PC) sont ignorés."""
     global tampon
     while entree.poll(0):
-        c = sys.stdin.read(1)
+        try:
+            c = sys.stdin.read(1)
+        except UnicodeError:  # octets invalides (parasites au démarrage / à l'arrêt du PC)
+            tampon = ""
+            continue
+        if not c:
+            break
         if c in ("\n", "\r"):
             if tampon:
                 ligne = tampon
@@ -87,7 +109,7 @@ def joli_raccourci(texte):
     morceaux = []
     for m in texte.split("+"):
         m = m.strip().lower()
-        morceaux.append(TOUCHES_LISIBLES.get(m, m.upper() if len(m) == 1 else m.capitalize()))
+        morceaux.append(TOUCHES_LISIBLES.get(m, m.upper() if len(m) == 1 else majuscule(m)))
     return " + ".join(morceaux)
 
 
@@ -105,19 +127,23 @@ def reaction_action(arg):
     nom = mots[0].upper()
     reste = mots[1].strip() if len(mots) > 1 else ""
     if nom == "APP":
-        ui.reagir("appli", reste.capitalize() or "Application")
+        ui.reagir("appli", majuscule(reste) or "Application")
+    elif nom == "RAC":
+        ui.reagir("clavier", majuscule(reste) or "Raccourci")
+    elif nom == "TOUCHES":
+        ui.reagir("clavier", joli_raccourci(reste) if reste else "Touches")
     elif nom in ("LUM", "LUM+", "LUM-"):
         ui.reagir("soleil", "Luminosité %s %%" % reste if reste else "Luminosité")
     elif nom == "VERROU":
         ui.reagir("cadenas", "Verrouillage")
     elif nom == "ECRAN_OFF":
-        ui.reagir("lune", "Écran éteint")
+        ui.reagir("lune", "Écran du PC noir")
+    elif nom == "ECRAN_ON":
+        ui.reagir("soleil", "Écran du PC rallumé")
     elif nom == "VEILLE":
         ui.reagir("lune", "Mise en veille")
-    elif nom == "ARRET":
-        ui.reagir("power", "Arrêt du PC…")
-    elif nom == "ANNULER":
-        ui.reagir("power", "Arrêt annulé")
+    elif nom in ("ARRET", "ANNULER"):
+        pass  # le compte à rebours (EVT ARRET n) s'en charge
     elif nom == "TEXTE":
         ui.reagir("clavier", "Texte envoyé")
     elif nom == "VOL":
@@ -213,6 +239,22 @@ def executer(ligne):
             reaction_action(val)
         elif typ == "PIN":
             ui.reagir("coucou", "Code : %s" % val, duree=60000)
+        elif typ == "ARRET":
+            # EVT ARRET 60 : le PC s'éteint dans 60 s ; 0 : arrêt annulé ; -1 : il s'éteint maintenant
+            try:
+                n = int(val)
+            except ValueError:
+                return "ERR utilise : EVT ARRET secondes"
+            maintenant = time.ticks_ms()
+            if n == 0:
+                if etat["arret_fin"] is not None:
+                    ui.reagir("power", "Arrêt annulé")
+                etat["arret_fin"] = None
+            elif n > 0:
+                etat["arret_total"] = n * 1000
+                etat["arret_fin"] = time.ticks_add(maintenant, n * 1000)
+            else:
+                etat["arret_fin"] = maintenant
         elif typ == "APP":
             if val == "1":
                 ui.reagir("coucou", "Téléphone connecté")
@@ -226,6 +268,12 @@ def executer(ligne):
         ecran_allume = arg.strip() != "0"
         if not ecran_allume:
             ecran.luminosite(0)
+        return "OK"
+    if cmd == "LUM_ESP":
+        try:
+            etat["lum"] = max(5, min(100, int(arg)))
+        except ValueError:
+            return "ERR utilise : LUM_ESP 5..100"
         return "OK"
     # --- clavier / souris / multimédia ----------------------------------------
     if not pc.is_open():
@@ -281,6 +329,17 @@ while True:
         maintenant = time.ticks_ms()
         if etat["connecte"] and time.ticks_diff(maintenant, derniere_donnee) > ATTENTE_ABSENT:
             etat["connecte"] = False
+        # écran noir : le PC s'est éteint après un arrêt annoncé, ou la carte vient de démarrer
+        # sans heure (PC éteint : son port USB coupe et remet le courant de temps en temps)
+        if etat["connecte"]:
+            etat["eteint"] = False
+            # l'arrêt était annoncé mais le PC tourne encore 90 s après (arrêt bloqué par une app,
+            # ou annulé depuis Windows) : on revient à l'écran normal
+            if etat["arret_fin"] is not None and time.ticks_diff(maintenant, etat["arret_fin"]) > 90000:
+                etat["arret_fin"] = None
+        elif etat["arret_fin"] is not None or not heure_connue():
+            etat["eteint"] = True
+            etat["arret_fin"] = None
         # météo : seulement quand le PC n'est pas utilisé (le téléchargement bloque 1 à 3 s)
         if (not etat["connecte"] or evt["verrou"]) and meteo.a_mettre_a_jour(maintenant):
             if meteo.mettre_a_jour(maintenant):

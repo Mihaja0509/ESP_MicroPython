@@ -14,8 +14,11 @@
 - Mesures envoyées 4 fois par seconde (CPU, RAM, volume, GPU, FPS) pour un écran plus vif.
 - Envoie l'heure du PC (ligne « TEMPS ») à la connexion puis chaque minute.
 - Prévient l'ESP32 de chaque commande PC exécutée (« EVT ACTION … ») pour que la mascotte réagisse.
-- Exécute les commandes « PC » : ouvrir une app, luminosité, verrouiller, écran éteint,
+- Exécute les commandes « PC » : ouvrir une app, luminosité, verrouiller, écran noir,
   veille, arrêt. Les autres commandes (KEY, TEXT, VOL+, MOUSE…) sont transmises à l'ESP32.
+- Phase 7 : « écran noir » sans veille (tous les écrans, le PC reste joignable), compte à
+  rebours d'arrêt sur l'ESP32 (EVT ARRET), luminosité de l'ESP32 (LUM_ESP), raccourcis
+  enregistrés depuis le téléphone (touches, texte, commande administrateur, app, pause…).
 
 Utilisation (dans le dossier Micro) :
   py -X utf8 tools\\agent\\agent_pc.py            port trouvé tout seul, avec console
@@ -26,11 +29,13 @@ supprime-le pour que l'agent se reconnecte.
 """
 import argparse
 import atexit
+import base64
 import collections
 import ctypes
 import glob
 import json
 import os
+import queue
 import re
 import subprocess
 import sys
@@ -75,6 +80,9 @@ FICHIER_PAUSE = DOSSIER / "PAUSE"
 FICHIER_LOG = DOSSIER / "agent.log"
 FICHIER_REGLAGES = DOSSIER / "reglages.json"
 FICHIER_APPAREILS = DOSSIER / "appareils.json"   # téléphones appairés (jamais dans Git)
+FICHIER_RACCOURCIS = DOSSIER / "raccourcis.json"
+FICHIER_PREFERENCES = DOSSIER / "preferences.json"
+DUREE_ARRET = 60    # s : compte à rebours de « Éteindre le PC »
 ACTIF_SI = 60       # s : une touche / la souris dans la dernière minute = quelqu'un est là
 MUET_MAX = 300      # s : après 5 min réveillé sans personne, on reprend quand même
 REGLAGES_DEFAUT = {"ville": "", "latitude": None, "longitude": None}
@@ -104,8 +112,11 @@ AIDE = """Commandes PC :
   APPS                  liste des apps   |  APP spotify    ouvre une app
   (les apps s'ajoutent / se retirent depuis l'app du téléphone, ou dans apps.json)
   LUM 70  LUM+  LUM-    luminosité de l'écran du PC
-  VERROU                verrouille        |  ECRAN_OFF      verrouille + éteint l'écran
+  VERROU                verrouille        |  ECRAN_OFF / ECRAN_ON / ECRAN_BASCULE  écran noir
   VEILLE                mise en veille    |  ARRET          arrêt dans 60 s  |  ANNULER
+  LUM_ESP 60            luminosité de l'écran de l'ESP32
+  RAC nom               lance un raccourci (créés depuis le téléphone, raccourcis.json)
+  TOUCHES ctrl+6        touches envoyées directement par Windows (disposition du clavier respectée)
   ETAT                  affiche ce que l'agent envoie à l'ESP32
   AUDIO                 liste les sorties audio (diagnostic du casque)
 Toute autre commande (KEY win+d, TEXT …, VOL+, MOUSE 100 0, CLIC…) part à l'ESP32.
@@ -183,8 +194,9 @@ class Liaison:
             return None
         try:
             return ser.readline().decode(errors="ignore").strip()
-        except serial.SerialException:
-            self.ser = None
+        except Exception:  # port fermé pendant la lecture (PAUSE, carte débranchée…)
+            if self.ser is ser:
+                self.ser = None
             return None
 
 
@@ -242,7 +254,13 @@ class _INPUT(ctypes.Structure):
     _fields_ = [("type", ctypes.c_ulong), ("u", _UNION)]
 
 
+# Heure de la dernière action venue du téléphone (souris, clavier, raccourci) : l'écran noir
+# ne se rallume que pour le vrai clavier / la vraie souris du PC.
+INJECTION = {"t": 0.0}
+
+
 def _envoyer_entrees(entrees):
+    INJECTION["t"] = time.time()
     tableau = (_INPUT * len(entrees))(*entrees)
     ctypes.windll.user32.SendInput(len(entrees), tableau, ctypes.sizeof(_INPUT))
 
@@ -286,6 +304,100 @@ def taper_pc(texte):
                 entrees.append(e)
     if entrees:
         _envoyer_entrees(entrees)
+
+
+# --- raccourcis clavier directement par Windows (Phase 7) ---
+# Les touches sont envoyées par leur code « scan », traduit selon la disposition du clavier
+# du PC (AZERTY ou QWERTY) : « ctrl+a » appuie bien sur la touche A, et les jeux les voient.
+TOUCHES_NOMMEES = {
+    "ctrl": 0xA2, "control": 0xA2, "shift": 0xA0, "maj": 0xA0, "alt": 0xA4, "altgr": 0xA5,
+    "win": 0x5B, "windows": 0x5B,
+    "enter": 0x0D, "entree": 0x0D, "entrée": 0x0D, "esc": 0x1B, "echap": 0x1B, "échap": 0x1B,
+    "tab": 0x09, "space": 0x20, "espace": 0x20, "backspace": 0x08, "retour": 0x08,
+    "delete": 0x2E, "suppr": 0x2E, "insert": 0x2D, "inser": 0x2D, "home": 0x24, "debut": 0x24,
+    "début": 0x24, "end": 0x23, "fin": 0x23, "pageup": 0x21, "pagedown": 0x22,
+    "up": 0x26, "haut": 0x26, "down": 0x28, "bas": 0x28, "left": 0x25, "gauche": 0x25,
+    "right": 0x27, "droite": 0x27, "printscreen": 0x2C, "impr": 0x2C, "menu": 0x5D,
+    "pause": 0x13, "capslock": 0x14, "verrmaj": 0x14,
+    "volup": 0xAF, "voldown": 0xAE, "mute": 0xAD, "play": 0xB3, "next": 0xB0, "prev": 0xB1,
+}
+for _n in range(1, 25):
+    TOUCHES_NOMMEES[f"f{_n}"] = 0x70 + _n - 1
+for _n in range(10):
+    TOUCHES_NOMMEES[f"num{_n}"] = 0x60 + _n
+TOUCHES_ETENDUES = {0x5B, 0x5C, 0x5D, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x2C,
+                    0x2D, 0x2E, 0x6F, 0x90, 0xA3, 0xA5, 0xAD, 0xAE, 0xAF, 0xB0, 0xB1, 0xB2, 0xB3}
+
+
+def lire_touches(texte):
+    """« ctrl+shift+esc » -> liste de codes de touches (VK), ou None si une touche est inconnue."""
+    codes = []
+    for morceau in str(texte).lower().replace(" ", "").split("+"):
+        if not morceau:
+            return None
+        if morceau in TOUCHES_NOMMEES:
+            codes.append(TOUCHES_NOMMEES[morceau])
+        elif len(morceau) == 1 and ("a" <= morceau <= "z" or "0" <= morceau <= "9"):
+            codes.append(ord(morceau.upper()))
+        elif len(morceau) == 1 and sys.platform == "win32":
+            vk = ctypes.windll.user32.VkKeyScanW(ord(morceau))
+            if vk == -1 or vk & 0xFF == 0xFF:
+                return None
+            codes.append(vk & 0xFF)
+        else:
+            return None
+    if not codes or len(codes) > 5:
+        return None
+    return codes
+
+
+def _touche(vk, haut):
+    scan = ctypes.windll.user32.MapVirtualKeyW(vk, 0) & 0xFF
+    flags = 0x0008 if scan else 0          # KEYEVENTF_SCANCODE : vu aussi par les jeux
+    if vk in TOUCHES_ETENDUES:
+        flags |= 0x0001                    # KEYEVENTF_EXTENDEDKEY
+    if haut:
+        flags |= 0x0002                    # KEYEVENTF_KEYUP
+    e = _INPUT(type=1)
+    e.u.ki = _KEYBDINPUT(vk, scan, flags, 0, 0)
+    return e
+
+
+def touches_pc(texte):
+    """Appuie sur un raccourci (ex. « ctrl+6 », « win+x », « alt+tab »). Renvoie False si inconnu."""
+    codes = lire_touches(texte)
+    if codes is None:
+        return False
+    _envoyer_entrees([_touche(c, False) for c in codes])
+    time.sleep(0.04)
+    _envoyer_entrees([_touche(c, True) for c in reversed(codes)])
+    return True
+
+
+class _RECT(ctypes.Structure):
+    _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
+                ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
+
+
+def moniteurs_windows():
+    """Écrans allumés : [(x, y, largeur, hauteur)] en pixels réels (étendu, 2e écran seul…)."""
+    res = []
+    if sys.platform != "win32":
+        return res
+    u = ctypes.windll.user32
+    proto = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p,
+                               ctypes.POINTER(_RECT), ctypes.c_ssize_t)
+
+    def rappel(_hmon, _hdc, rect, _data):
+        r = rect.contents
+        res.append((r.left, r.top, r.right - r.left, r.bottom - r.top))
+        return 1
+
+    fonction = proto(rappel)
+    u.EnumDisplayMonitors(None, None, fonction, 0)
+    if not res:
+        res.append((0, 0, u.GetSystemMetrics(0), u.GetSystemMetrics(1)))
+    return res
 
 
 def adresses_ip():
@@ -907,21 +1019,358 @@ def executer_pc(ligne):
     if cmd == "VERROU":
         ctypes.windll.user32.LockWorkStation()
         return "PC verrouillé"
-    if cmd == "ECRAN_OFF":
+    if cmd == "VEILLE":
+        # Ce PC n'a que la veille moderne (S0) : on y entre en verrouillant puis en coupant
+        # l'écran (SetSuspendState ne marche pas sans S3 ni hibernation).
         ctypes.windll.user32.LockWorkStation()
         time.sleep(0.5)
         ctypes.windll.user32.PostMessageW(0xFFFF, 0x0112, 0xF170, 2)
-        return "Écran éteint"
-    if cmd == "VEILLE":
-        subprocess.Popen("rundll32.exe powrprof.dll,SetSuspendState 0,1,0", shell=True)
         return "Mise en veille"
+    if cmd == "TOUCHES":
+        if not touches_pc(arg):
+            return f"Touche inconnue : {arg}"
+        return f"Touches : {arg}"
     if cmd == "ARRET":
-        subprocess.Popen("shutdown /s /t 60", shell=True)
-        return "Arrêt dans 60 s (ANNULER pour annuler)"
+        subprocess.Popen(f"shutdown /s /t {DUREE_ARRET}", shell=True)
+        return f"Arrêt dans {DUREE_ARRET} s (ANNULER pour annuler)"
     if cmd == "ANNULER":
         subprocess.Popen("shutdown /a", shell=True)
         return "Arrêt annulé"
     return None
+
+
+# --------------------------------------------------------------------------
+# Préférences gardées par l'agent (Phase 7)
+# --------------------------------------------------------------------------
+def charger_preferences():
+    try:
+        p = json.loads(FICHIER_PREFERENCES.read_text(encoding="utf-8"))
+        return p if isinstance(p, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def ecrire_preferences(p):
+    provisoire = FICHIER_PREFERENCES.with_suffix(".tmp")
+    provisoire.write_text(json.dumps(p, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(provisoire, FICHIER_PREFERENCES)
+
+
+# --------------------------------------------------------------------------
+# Écran noir sans veille (Phase 7)
+# --------------------------------------------------------------------------
+class EcranNoir:
+    """Rend tous les écrans noirs SANS mettre le PC en veille (il reste joignable).
+
+    - une fenêtre noire plein écran sur chaque écran (étendu, 2e écran seul…), au premier plan,
+      invisible pour les captures d'écran (l'aperçu du téléphone montre le vrai écran) ;
+    - luminosité à 0 (écran du portable, et écrans externes qui l'acceptent) ;
+    - Windows est prié de ne pas s'endormir tant que l'écran noir est actif ;
+    - toucher le vrai clavier ou la vraie souris du PC rallume tout (le téléphone, lui, peut
+      piloter le PC sans rallumer l'écran : bouton « Rallumer » de l'app).
+    Tkinter n'accepte d'être utilisé que depuis un seul fil : tout passe par une file.
+    """
+
+    def __init__(self, fin_de_session=None):
+        self.actif = False
+        self.probleme = ""
+        self._file = queue.Queue()
+        self._fenetres = []
+        self._depuis = 0.0
+        self._fin_de_session = fin_de_session
+        self._restaurer_luminosite()  # l'agent s'était arrêté pendant un écran noir
+        threading.Thread(target=self._fil, daemon=True).start()
+
+    # appelées par les autres fils
+    def allumer_noir(self):
+        self._file.put(True)
+
+    def eteindre_noir(self):
+        self._file.put(False)
+
+    # --- fil de Tkinter ---
+    def _fil(self):
+        try:
+            import tkinter as tk
+            self._tk = tk
+            self._racine = tk.Tk()
+            self._racine.withdraw()
+            if self._fin_de_session is not None:
+                # Windows prévient les fenêtres quand la session se ferme (arrêt du PC)
+                self._racine.protocol("WM_SAVE_YOURSELF", self._fin_de_session)
+            self._racine.after(100, self._verifier)
+            self._racine.mainloop()
+        except Exception as e:
+            self.probleme = f"écran noir indisponible : {e}"
+            print(f"[agent] {self.probleme}")
+
+    def _verifier(self):
+        try:
+            while True:
+                demande = self._file.get_nowait()
+                if demande and not self.actif:
+                    self._noir()
+                elif not demande and self.actif:
+                    self._rallumer()
+        except queue.Empty:
+            pass
+        except Exception as e:
+            print(f"[agent] écran noir : {e}")
+        # quelqu'un touche le vrai clavier / la vraie souris du PC : on rallume
+        # (pas pour les actions du téléphone : on peut piloter le PC avec l'écran noir)
+        if (self.actif and time.time() - self._depuis > 1.5 and inactivite() < 0.5
+                and time.time() - INJECTION["t"] > 1.0):
+            self._rallumer()
+        self._racine.after(100, self._verifier)
+
+    def _noir(self):
+        tk = self._tk
+        u = ctypes.windll.user32
+        for x, y, w, h in moniteurs_windows():
+            f = tk.Toplevel(self._racine)
+            f.overrideredirect(True)
+            f.configure(bg="black", cursor="none")
+            f.geometry(f"{w}x{h}+{x}+{y}")
+            f.attributes("-topmost", True)
+            f.update_idletasks()
+            try:
+                hwnd = u.GetAncestor(f.winfo_id(), 2) or f.winfo_id()  # GA_ROOT
+                u.SetWindowDisplayAffinity(hwnd, 0x11)  # WDA_EXCLUDEFROMCAPTURE
+            except Exception:
+                pass
+            self._fenetres.append(f)
+        # ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED : pas de veille tant que
+        # ce fil le demande (l'écran reste « allumé » pour Windows, mais noir et sans lumière)
+        ctypes.windll.kernel32.SetThreadExecutionState(0x80000003)
+        self._depuis = time.time()
+        self.actif = True
+        threading.Thread(target=self._luminosite_a_zero, daemon=True).start()
+        print("[agent] écran noir")
+
+    def _rallumer(self):
+        for f in self._fenetres:
+            try:
+                f.destroy()
+            except Exception:
+                pass
+        self._fenetres = []
+        ctypes.windll.kernel32.SetThreadExecutionState(0x80000000)  # retour à la normale
+        self.actif = False
+        threading.Thread(target=self._restaurer_luminosite, daemon=True).start()
+        print("[agent] écran rallumé")
+
+    @staticmethod
+    def _luminosite_a_zero():
+        if sbc is None:
+            return
+        try:
+            avant = sbc.get_brightness()
+            avant = avant if isinstance(avant, list) else [avant]
+            p = charger_preferences()
+            p["luminosite_avant_noir"] = avant
+            ecrire_preferences(p)
+            for i in range(len(avant)):
+                try:
+                    sbc.set_brightness(0, display=i)
+                except Exception:
+                    pass  # écran externe sans réglage (la fenêtre noire suffit)
+        except Exception as e:
+            print(f"[agent] luminosité (écran noir) : {e}")
+
+    @staticmethod
+    def _restaurer_luminosite():
+        p = charger_preferences()
+        avant = p.pop("luminosite_avant_noir", None)
+        if not avant or sbc is None:
+            return
+        for i, v in enumerate(avant):
+            try:
+                sbc.set_brightness(max(10, int(v)), display=i)
+            except Exception:
+                pass
+        try:
+            ecrire_preferences(p)
+        except OSError:
+            pass
+
+
+# --------------------------------------------------------------------------
+# Raccourcis (Phase 7) : une suite d'étapes lancée d'un seul appui sur le téléphone
+# --------------------------------------------------------------------------
+VERROU_RACCOURCIS = threading.Lock()
+TYPES_ETAPES = ("touches", "texte", "entree", "commande", "app", "pause", "action")
+ICONES_RACCOURCIS = ("eclair", "jeu", "terminal", "clavier", "musique", "web", "dossier", "etoile")
+RACCOURCIS_DEFAUT = [
+    {"nom": "Ctrl + 6", "icone": "clavier", "etapes": [{"type": "touches", "valeur": "ctrl+6"}]},
+]
+
+
+def charger_raccourcis():
+    with VERROU_RACCOURCIS:
+        if not FICHIER_RACCOURCIS.exists():
+            FICHIER_RACCOURCIS.write_text(json.dumps(RACCOURCIS_DEFAUT, ensure_ascii=False, indent=2),
+                                          encoding="utf-8")
+        try:
+            liste = json.loads(FICHIER_RACCOURCIS.read_text(encoding="utf-8"))
+        except ValueError:
+            return []
+    return [r for r in liste if isinstance(r, dict) and r.get("nom")] if isinstance(liste, list) else []
+
+
+def _ecrire_raccourcis(liste):
+    with VERROU_RACCOURCIS:
+        provisoire = FICHIER_RACCOURCIS.with_suffix(".tmp")
+        provisoire.write_text(json.dumps(liste, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(provisoire, FICHIER_RACCOURCIS)
+
+
+def _trouver_raccourci(liste, nom):
+    nom = str(nom).strip().lower()
+    for i, r in enumerate(liste):
+        if str(r.get("nom", "")).lower() == nom:
+            return i
+    return None
+
+
+def valider_raccourci(d):
+    """Vérifie un raccourci venu du téléphone. Renvoie (ok, texte, raccourci propre)."""
+    if not isinstance(d, dict):
+        return False, "Raccourci invalide", None
+    nom = " ".join(str(d.get("nom", "")).split())
+    if not nom or len(nom) > 30 or any(ord(c) < 32 for c in nom) or '"' in nom:
+        return False, "Nom vide, trop long (30 max) ou avec des guillemets", None
+    icone = str(d.get("icone", "eclair"))
+    if icone not in ICONES_RACCOURCIS:
+        icone = "eclair"
+    brutes = d.get("etapes")
+    if not isinstance(brutes, list) or not brutes:
+        return False, "Ajoute au moins une étape", None
+    if len(brutes) > 20:
+        return False, "20 étapes au maximum", None
+    etapes = []
+    for n, e in enumerate(brutes, 1):
+        if not isinstance(e, dict) or e.get("type") not in TYPES_ETAPES:
+            return False, f"Étape {n} : type inconnu", None
+        t = e["type"]
+        v = str(e.get("valeur", ""))
+        propre = {"type": t, "valeur": v}
+        if t == "touches":
+            if lire_touches(v) is None:
+                return False, f"Étape {n} : touches inconnues « {v} » (ex. ctrl+6, win+x)", None
+        elif t == "texte":
+            if not v or len(v) > 500:
+                return False, f"Étape {n} : texte vide ou trop long", None
+        elif t == "entree":
+            propre["valeur"] = ""
+        elif t == "commande":
+            if not v.strip() or len(v) > 2000:
+                return False, f"Étape {n} : commande vide ou trop longue", None
+            propre["shell"] = "cmd" if e.get("shell") == "cmd" else "powershell"
+            propre["visible"] = bool(e.get("visible", True))
+        elif t == "app":
+            if not v.strip():
+                return False, f"Étape {n} : choisis une app", None
+        elif t == "pause":
+            try:
+                ms = int(float(v))
+            except ValueError:
+                return False, f"Étape {n} : pause en millisecondes (ex. 1500)", None
+            if not 0 <= ms <= 30000:
+                return False, f"Étape {n} : pause de 0 à 30000 ms", None
+            propre["valeur"] = str(ms)
+        elif t == "action":
+            if not v.strip() or len(v) > 200 or v.strip().upper().startswith("RAC"):
+                return False, f"Étape {n} : action invalide", None
+        etapes.append(propre)
+    return True, "", {"nom": nom, "icone": icone, "etapes": etapes}
+
+
+def ajouter_raccourci(d, ancien=""):
+    """Ajoute ou modifie un raccourci. [ancien] = nom avant modification (renommage)."""
+    ok, texte, propre = valider_raccourci(d)
+    if not ok:
+        return False, texte
+    liste = charger_raccourcis()
+    remplace = False
+    for nom in {str(ancien or ""), propre["nom"]}:
+        i = _trouver_raccourci(liste, nom) if nom else None
+        if i is not None:
+            del liste[i]
+            remplace = True
+    liste.append(propre)
+    _ecrire_raccourcis(liste)
+    return True, ("Raccourci modifié : " if remplace else "Raccourci ajouté : ") + propre["nom"]
+
+
+def retirer_raccourci(nom):
+    liste = charger_raccourcis()
+    i = _trouver_raccourci(liste, nom)
+    if i is None:
+        return False, f"Raccourci inconnu : {nom}"
+    nom = liste[i]["nom"]
+    del liste[i]
+    _ecrire_raccourcis(liste)
+    return True, f"Raccourci retiré : {nom}"
+
+
+def lancer_commande(commande, shell, visible, titre):
+    """Lance une commande en administrateur (l'agent l'est déjà : pas de fenêtre UAC).
+    Visible : une fenêtre PowerShell / cmd reste ouverte pour voir le résultat.
+    Cachée : l'agent attend la fin (2 min max) avant l'étape suivante."""
+    if shell == "cmd":
+        args = f'cmd.exe {"/k" if visible else "/c"} {commande}'
+    else:
+        if visible:
+            titre = titre.replace("'", "''")
+            commande = f"$host.UI.RawUI.WindowTitle = 'Dadou : {titre}'\n" + commande
+        code = base64.b64encode(commande.encode("utf-16-le")).decode("ascii")
+        args = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass"]
+        args += ["-NoExit"] if visible else []
+        args += ["-EncodedCommand", code]
+    flags = 0x00000010 if visible else 0x08000000  # nouvelle console / sans fenêtre
+    p = subprocess.Popen(args, creationflags=flags, cwd=os.path.expanduser("~"))
+    if not visible:
+        try:
+            p.wait(timeout=120)
+        except subprocess.TimeoutExpired:
+            return "toujours en cours après 2 min"
+        if p.returncode:
+            return f"code de sortie {p.returncode}"
+    return ""
+
+
+def derouler_raccourci(r, executer):
+    """Exécute les étapes une par une (dans un fil à part). executer(ligne) = commande Dadou."""
+    print(f"[agent] raccourci : {r['nom']}")
+    for n, e in enumerate(r["etapes"], 1):
+        t, v = e["type"], e.get("valeur", "")
+        try:
+            if t == "touches":
+                touches_pc(v)
+            elif t == "texte":
+                taper_pc(v)
+            elif t == "entree":
+                touches_pc("enter")
+            elif t == "commande":
+                probleme = lancer_commande(v, e.get("shell", "powershell"), e.get("visible", True),
+                                           r["nom"])
+                if probleme:
+                    print(f"[agent] raccourci {r['nom']}, étape {n} : {probleme}")
+            elif t == "app":
+                apps = charger_apps()
+                nom = trouver_app(apps, v)
+                if nom is None:
+                    print(f"[agent] raccourci {r['nom']}, étape {n} : app inconnue {v}")
+                else:
+                    lancer_app(apps[nom])
+            elif t == "pause":
+                time.sleep(min(30.0, int(v) / 1000))
+                continue
+            elif t == "action":
+                executer(v)
+        except Exception as ex:
+            print(f"[agent] raccourci {r['nom']}, étape {n} ({t}) : {ex!r}")
+        time.sleep(0.15)  # laisse Windows suivre entre deux étapes
 
 
 # --------------------------------------------------------------------------
@@ -947,6 +1396,21 @@ class Agent:
         self.reveil = 0.0        # heure du dernier réveil « tout seul » (veille moderne), 0 = non
         self.lhm = LecteurLHM()
         self.fps = CompteurFPS()
+        self.arret_fin = 0.0     # heure prévue de l'arrêt du PC (0 = pas d'arrêt)
+        self.lum_esp = max(5, min(100, int(charger_preferences().get("lum_esp", 85))))
+        self.lent["ecrans"] = 1
+        self.noir = EcranNoir(fin_de_session=self._fin_de_session)
+
+    def _fin_de_session(self):
+        """Windows ferme la session (arrêt ou redémarrage, même lancé depuis le menu Démarrer) :
+        l'ESP32 dit au revoir puis s'éteint quand les données s'arrêtent."""
+        print("[agent] fin de session Windows : au revoir")
+        self.liaison.muet = False
+        self.liaison.envoyer("EVT ARRET -1")
+
+    def arret_reste(self):
+        reste = round(self.arret_fin - time.time())
+        return reste if self.arret_fin and reste > 0 else -1
 
     def boucle_mesures(self):
         if comtypes is not None:
@@ -962,63 +1426,73 @@ class Agent:
         if not self.fps.demarrer():
             print(f"[agent] {self.fps.probleme}")
         tour = 0
-        prochaine_connexion = 0.0
+        self.prochaine_connexion = 0.0
         tour_avant = time.time()
         while self.actif:
             debut = time.time()
-            self._surveiller_reveil(debut - tour_avant)
+            try:
+                tour = self._tour_mesures(tour, debut, tour_avant)
+            except Exception as e:  # une mesure qui plante ne doit jamais arrêter l'agent
+                print(f"[agent] erreur dans la boucle des mesures : {e!r}")
+                tour += 1
+                time.sleep(1)
             tour_avant = debut
-            # --- liaison avec l'ESP32 (les mesures continuent même sans elle, pour l'app) ---
-            if FICHIER_PAUSE.exists():
-                if self.liaison.ser is not None:
-                    self.liaison.fermer()
-                    print("[agent] pause : port COM libéré")
-            elif self.liaison.ser is None and debut >= prochaine_connexion:
-                if self.liaison.connecter():
-                    if tour > 0:
-                        self._reveil_discret("liaison USB revenue")
-                    self.precedent = {}  # renvoie tous les états après reconnexion
-                    self.dernier_temps = 0.0
-                    self.meteo_envoyee = -1
-                else:
-                    prochaine_connexion = debut + 3
-
-            lent = tour % 4 == 0  # une fois par seconde
-            if lent:
-                self._mesures_lentes()
-
-            # --- mesures rapides : 4 fois par seconde ---
-            cpu = round(psutil.cpu_percent(interval=None))
-            ram = round(psutil.virtual_memory().percent)
-            vol = self._garder("vol", volume(), 10)
-            bat, charge = self.lent["bat"]
-            self.dernier_stat = f"STAT {cpu} {ram} {vol} {bat} {charge}"
-            self.liaison.envoyer(self.dernier_stat)
-            t, u, mem = gpu()
-            t = self._garder("gpu_t", t)
-            u = self._garder("gpu_u", u)
-            mem = self._garder("gpu_m", mem)
-            self.dernier_gpu = f"GPU {t} {u} {mem}"
-            self.liaison.envoyer(self.dernier_gpu)
-            en_jeu = self.precedent.get("JEU", "-") != "-"
-            fps = self._garder("fps", self.fps.fps(), 3) if en_jeu else -1
-            self.dernier_perf = f"PERF {self.lent['cpu_temp']} {fps}"
-            self.liaison.envoyer(self.dernier_perf)
-
-            p = self.precedent
-            self.donnees = {
-                "cpu": cpu, "ram": ram, "vol": vol, "bat": bat, "chg": charge,
-                "gpu_temp": t, "gpu_charge": u, "vram": mem,
-                "cpu_temp": self.lent["cpu_temp"], "fps": fps,
-                "casque": "" if p.get("CASQUE", "-") == "-" else p.get("CASQUE"),
-                "manette": p.get("MANETTE") == "1", "verrou": p.get("VERROU") == "1",
-                "jeu": "" if p.get("JEU", "-") == "-" else p.get("JEU"),
-                "meteo": [dict(zip(("icone", "tmax", "tmin", "pluie", "heure"), j))
-                          for j in self.meteo.jours],
-                "esp": self.liaison.ser is not None, "ecran_esp": self.ecran_esp,
-            }
-            tour += 1
             time.sleep(max(0.0, 0.25 - (time.time() - debut)))
+
+    def _tour_mesures(self, tour, debut, tour_avant):
+        self._surveiller_reveil(debut - tour_avant)
+        # --- liaison avec l'ESP32 (les mesures continuent même sans elle, pour l'app) ---
+        if FICHIER_PAUSE.exists():
+            if self.liaison.ser is not None:
+                self.liaison.fermer()
+                print("[agent] pause : port COM libéré")
+        elif self.liaison.ser is None and debut >= self.prochaine_connexion:
+            if self.liaison.connecter():
+                if tour > 0:
+                    self._reveil_discret("liaison USB revenue")
+                self.precedent = {}  # renvoie tous les états après reconnexion
+                self.dernier_temps = 0.0
+                self.meteo_envoyee = -1
+            else:
+                self.prochaine_connexion = debut + 3
+
+        lent = tour % 4 == 0  # une fois par seconde
+        if lent:
+            self._mesures_lentes()
+
+        # --- mesures rapides : 4 fois par seconde ---
+        cpu = round(psutil.cpu_percent(interval=None))
+        ram = round(psutil.virtual_memory().percent)
+        vol = self._garder("vol", volume(), 10)
+        bat, charge = self.lent["bat"]
+        self.dernier_stat = f"STAT {cpu} {ram} {vol} {bat} {charge}"
+        self.liaison.envoyer(self.dernier_stat)
+        t, u, mem = gpu()
+        t = self._garder("gpu_t", t)
+        u = self._garder("gpu_u", u)
+        mem = self._garder("gpu_m", mem)
+        self.dernier_gpu = f"GPU {t} {u} {mem}"
+        self.liaison.envoyer(self.dernier_gpu)
+        en_jeu = self.precedent.get("JEU", "-") != "-"
+        fps = self._garder("fps", self.fps.fps(), 3) if en_jeu else -1
+        self.dernier_perf = f"PERF {self.lent['cpu_temp']} {fps}"
+        self.liaison.envoyer(self.dernier_perf)
+
+        p = self.precedent
+        self.donnees = {
+            "cpu": cpu, "ram": ram, "vol": vol, "bat": bat, "chg": charge,
+            "gpu_temp": t, "gpu_charge": u, "vram": mem,
+            "cpu_temp": self.lent["cpu_temp"], "fps": fps,
+            "casque": "" if p.get("CASQUE", "-") == "-" else p.get("CASQUE"),
+            "manette": p.get("MANETTE") == "1", "verrou": p.get("VERROU") == "1",
+            "jeu": "" if p.get("JEU", "-") == "-" else p.get("JEU"),
+            "meteo": [dict(zip(("icone", "tmax", "tmin", "pluie", "heure"), j))
+                      for j in self.meteo.jours],
+            "esp": self.liaison.ser is not None, "ecran_esp": self.ecran_esp,
+            "arret": self.arret_reste(), "ecran_noir": self.noir.actif,
+            "lum_esp": self.lum_esp, "ecrans": self.lent["ecrans"],
+        }
+        return tour + 1
 
     def _reveil_discret(self, raison):
         """Windows (veille moderne) réveille le PC quelques secondes de temps en temps.
@@ -1067,6 +1541,16 @@ class Agent:
                                  f"{lt.tm_hour} {lt.tm_min} {lt.tm_sec}")
         self.lent["bat"] = batterie()
         self.lent["cpu_temp"] = self._garder("cpu_t", self.lhm.temperature_cpu())
+        self.lent["ecrans"] = len(moniteurs_windows())
+        # luminosité de l'ESP32 et arrêt en cours : renvoyés après chaque (re)connexion
+        if self.precedent.get("LUM_ESP") != self.lum_esp:
+            self.precedent["LUM_ESP"] = self.lum_esp
+            self.liaison.envoyer(f"LUM_ESP {self.lum_esp}")
+        reste = self.arret_reste()
+        if self.precedent.get("ARRET") != (reste > 0):
+            self.precedent["ARRET"] = reste > 0
+            if reste > 0:
+                self.liaison.envoyer(f"EVT ARRET {reste}")
         if self.meteo.a_mettre_a_jour():
             self.meteo.lancer()
         if self.meteo.jours and self.meteo_envoyee != self.meteo.version:
@@ -1098,8 +1582,13 @@ class Agent:
         ligne = ligne.strip()
         if not ligne:
             return ""
-        cmd = ligne.split(" ", 1)[0].upper()
+        mots = ligne.split(" ", 1)
+        cmd = mots[0].upper()
+        arg = mots[1].strip() if len(mots) > 1 else ""
         self.reprendre()
+        special = self._executer_special(cmd, arg)
+        if special is not None:
+            return special
         reponse = executer_pc(ligne)
         if reponse is not None:
             if cmd not in ("APPS", "AUDIO"):
@@ -1107,9 +1596,71 @@ class Agent:
             return reponse
         if cmd == "ECRAN_ESP":
             self.ecran_esp = ligne.split(" ", 1)[-1].strip() != "0"
+        else:
+            INJECTION["t"] = time.time()  # touches / souris par l'ESP32 : action du téléphone
         if self.liaison.envoyer(ligne):
             return "Envoyé à l'ESP32"
         return "ESP32 non connectée"
+
+    def _executer_special(self, cmd, arg):
+        """Commandes qui ont besoin de l'état de l'agent (Phase 7). None = pas pour moi."""
+        if cmd in ("ECRAN_OFF", "ECRAN_ON", "ECRAN_BASCULE"):
+            allumer_noir = cmd == "ECRAN_OFF" or (cmd == "ECRAN_BASCULE" and not self.noir.actif)
+            if self.noir.probleme:
+                return self.noir.probleme
+            if allumer_noir:
+                self.noir.allumer_noir()
+                self.liaison.envoyer("EVT ACTION ECRAN_OFF")
+                return "Écran du PC noir (le PC reste allumé et joignable)"
+            self.noir.eteindre_noir()
+            self.liaison.envoyer("EVT ACTION ECRAN_ON")
+            return "Écran du PC rallumé"
+        if cmd == "VEILLE" and self.noir.actif:
+            self.noir.eteindre_noir()
+            time.sleep(0.3)
+            return None  # puis la vraie mise en veille (executer_pc)
+        if cmd == "ARRET":
+            reste = self.arret_reste()
+            if reste > 0:
+                return f"Arrêt déjà prévu dans {reste} s"
+            texte = executer_pc("ARRET")
+            self.arret_fin = time.time() + DUREE_ARRET
+            self.precedent["ARRET"] = True
+            self.liaison.envoyer(f"EVT ARRET {DUREE_ARRET}")
+            return texte
+        if cmd == "ANNULER":
+            texte = executer_pc("ANNULER")
+            self.arret_fin = 0.0
+            self.precedent["ARRET"] = False
+            self.liaison.envoyer("EVT ARRET 0")
+            return texte
+        if cmd == "LUM_ESP":
+            try:
+                self.lum_esp = max(5, min(100, int(float(arg))))
+            except ValueError:
+                return "Utilise : LUM_ESP 5..100"
+            p = charger_preferences()
+            p["lum_esp"] = self.lum_esp
+            try:
+                ecrire_preferences(p)
+            except OSError:
+                pass
+            self.precedent["LUM_ESP"] = self.lum_esp
+            self.liaison.envoyer(f"LUM_ESP {self.lum_esp}")
+            return f"Luminosité de l'ESP32 : {self.lum_esp} %"
+        if cmd == "RAC":
+            return self.lancer_raccourci(arg)
+        return None
+
+    def lancer_raccourci(self, nom):
+        liste = charger_raccourcis()
+        i = _trouver_raccourci(liste, nom)
+        if i is None:
+            return f"Raccourci inconnu : {nom}"
+        r = liste[i]
+        self.liaison.envoyer("EVT ACTION RAC " + texte_ascii(r["nom"]))
+        threading.Thread(target=derouler_raccourci, args=(r, self.executer), daemon=True).start()
+        return f"Raccourci : {r['nom']}"
 
     def rappels_app(self):
         def afficher_pin(pin):
@@ -1130,12 +1681,22 @@ class Agent:
             "etat": lambda: self.donnees,
             "apps": liste_apps,
             "ajouter_app": ajouter_app, "retirer_app": retirer_app,
+            "raccourcis": charger_raccourcis,
+            "ajouter_raccourci": ajouter_raccourci, "retirer_raccourci": retirer_raccourci,
             "afficher_pin": afficher_pin,
             "souris": souris_pc, "clic": clic_pc, "molette": molette_pc,
             "texte": texte, "connexion": connexion,
         }
 
     def boucle_lecture(self):
+        while self.actif:
+            try:
+                self._lire_esp()
+            except Exception as e:  # ne doit jamais s'arrêter : sinon l'ESP32 n'est plus lue
+                print(f"[agent] erreur de lecture de l'ESP32 : {e!r}")
+                time.sleep(1)
+
+    def _lire_esp(self):
         dernier_redemarrage = 0.0
         while self.actif:
             ligne = self.liaison.lire_ligne()
@@ -1193,6 +1754,15 @@ def main():
     parser.add_argument("--service", action="store_true",
                         help="sans console : tourne en fond, écrit dans agent.log")
     args = parser.parse_args()
+
+    # Pixels réels sur chaque écran (écran noir et aperçu justes même avec la mise à l'échelle)
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    except Exception:
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
 
     if args.service:
         journal = open(FICHIER_LOG, "a", encoding="utf-8", buffering=1)

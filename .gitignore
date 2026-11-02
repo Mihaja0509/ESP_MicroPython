@@ -12,3 +12,6 @@ tools/agent/PAUSE
 tools/agent/agent.log
 tools/agent/reglages.json
 tools/agent/appareils.json
+tools/agent/raccourcis.json
+tools/agent/preferences.json
+tools/agent/*.tmp

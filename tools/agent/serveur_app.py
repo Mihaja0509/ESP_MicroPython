@@ -15,10 +15,15 @@ Messages (JSON, un par message) :
     {"type": "apps"}                                 liste des apps
     {"type": "app_ajout", "nom": "YouTube", "cible": "https://…", "sorte": "web"|"chemin"}
     {"type": "app_retrait", "nom": "YouTube"}
+    {"type": "raccourcis"}                           liste des raccourcis (Phase 7)
+    {"type": "rac_ajout", "raccourci": {nom, icone, etapes: [...]}, "ancien": "nom avant"}
+    {"type": "rac_retrait", "nom": "Prépa jeu"}
+    (lancer un raccourci : {"type": "cmd", "ligne": "RAC Prépa jeu"})
   PC -> téléphone
     {"type": "auth_requise"} {"type": "auth_ok", "token": "..."} {"type": "erreur", "texte": "..."}
     {"type": "pin_affiche"} {"type": "etat", ...} (4 fois / s) {"type": "rep", "ligne": ..., "texte": ...}
     {"type": "apps", "apps": [{"nom": ..., "cible": ..., "type": "web"|"chemin"|"autre"}, ...]}
+    {"type": "raccourcis", "raccourcis": [{"nom": ..., "icone": ..., "etapes": [...]}, ...]}
 """
 import asyncio
 import json
@@ -39,6 +44,8 @@ class ServeurApp:
         """rappels : dict de fonctions fournies par l'agent :
         executer(ligne) -> str, etat() -> dict, apps() -> list, afficher_pin(pin),
         ajouter_app(nom, cible, sorte) -> (ok, texte), retirer_app(nom) -> (ok, texte),
+        raccourcis() -> list, ajouter_raccourci(dict, ancien) -> (ok, texte),
+        retirer_raccourci(nom) -> (ok, texte),
         souris(dx, dy), clic(bouton), molette(n), texte(t), connexion(nb_telephones)."""
         self.fichier = Path(fichier_appareils)
         self.r = rappels
@@ -162,6 +169,18 @@ class ServeurApp:
                             None, self.r["retirer_app"], str(m.get("nom", "")))
                     await self._envoyer(ws, {"type": "rep", "ligne": typ, "texte": texte, "ok": ok})
                     await self._envoyer(ws, {"type": "apps", "apps": self.r["apps"]()})
+                elif typ == "raccourcis":
+                    await self._envoyer(ws, {"type": "raccourcis", "raccourcis": self.r["raccourcis"]()})
+                elif typ in ("rac_ajout", "rac_retrait"):
+                    if typ == "rac_ajout":
+                        ok, texte = await boucle.run_in_executor(
+                            None, self.r["ajouter_raccourci"], m.get("raccourci"),
+                            str(m.get("ancien") or ""))
+                    else:
+                        ok, texte = await boucle.run_in_executor(
+                            None, self.r["retirer_raccourci"], str(m.get("nom", "")))
+                    await self._envoyer(ws, {"type": "rep", "ligne": typ, "texte": texte, "ok": ok})
+                    await self._envoyer(ws, {"type": "raccourcis", "raccourcis": self.r["raccourcis"]()})
                 elif typ == "cmd":
                     ligne = str(m.get("ligne", ""))[:200]
                     texte = await boucle.run_in_executor(None, self.r["executer"], ligne)

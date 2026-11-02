@@ -48,6 +48,10 @@ class EtatPC {
   final List<JourMeteo> meteo;
   final bool esp;
   final bool ecranEsp;
+  final int arret; // secondes avant l'arrêt du PC, -1 = pas d'arrêt prévu
+  final bool ecranNoir; // écran du PC en mode « écran noir »
+  final int lumEsp; // luminosité de l'écran de l'ESP32 (5 à 100), -1 = inconnue
+  final int ecrans; // nombre d'écrans allumés sur le PC
 
   const EtatPC({
     required this.recu,
@@ -68,6 +72,10 @@ class EtatPC {
     required this.meteo,
     required this.esp,
     required this.ecranEsp,
+    this.arret = -1,
+    this.ecranNoir = false,
+    this.lumEsp = -1,
+    this.ecrans = 1,
   });
 
   factory EtatPC.vide() => const EtatPC(
@@ -118,8 +126,14 @@ class EtatPC {
       meteo: meteo,
       esp: m['esp'] == true,
       ecranEsp: m['ecran_esp'] != false,
+      arret: m.containsKey('arret') ? _entier(m['arret']) : -1,
+      ecranNoir: m['ecran_noir'] == true,
+      lumEsp: _entier(m['lum_esp']),
+      ecrans: m['ecrans'] is num ? (m['ecrans'] as num).toInt() : 1,
     );
   }
 
   bool get enJeu => jeu.isNotEmpty;
+
+  bool get arretPrevu => arret > 0;
 }

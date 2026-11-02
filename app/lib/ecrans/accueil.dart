@@ -1,11 +1,14 @@
 // Écran d'accueil : la mascotte, l'état du PC (comme l'écran de l'ESP32) et les actions rapides.
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
+import '../actions.dart';
 import '../connexion.dart';
 import '../etat.dart';
 import '../theme.dart';
 import '../widgets/anneau.dart';
 import '../widgets/mascotte.dart';
+import 'controles.dart' show BandeauArret;
 
 class EcranAccueil extends StatelessWidget {
   final Connexion cx;
@@ -21,8 +24,14 @@ class EcranAccueil extends StatelessWidget {
         _entete(e),
         const SizedBox(height: 16),
         if (!cx.connecte) _horsLigne(context) else ...[
+          if (e.arretPrevu) ...[
+            BandeauArret(secondes: e.arret, onAnnuler: () => cx.cmd('ANNULER')),
+            const SizedBox(height: 14),
+          ],
           if (e.enJeu) ...[_carteJeu(e), const SizedBox(height: 14)],
           _carteStats(e),
+          const SizedBox(height: 14),
+          _favoris(context),
           const SizedBox(height: 14),
           if (e.meteo.isNotEmpty) ...[_carteMeteo(e), const SizedBox(height: 14)],
           _actions(context, e),
@@ -253,6 +262,42 @@ class EcranAccueil extends StatelessWidget {
     );
   }
 
+  /// Favoris choisis dans Contrôles (appui long) : un appui pour les lancer.
+  Widget _favoris(BuildContext context) {
+    final favoris = favorisResolus(cx);
+    return Carte(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Titre('Favoris', icone: Icons.star_rounded),
+          if (favoris.isEmpty)
+            const Text(
+              'Dans Contrôles, fais un appui long sur un raccourci, une app ou une action, '
+              'puis « Ajouter aux favoris ». Ils apparaîtront ici et dans le widget du téléphone.',
+              style: TextStyle(color: Couleurs.gris, fontSize: 13),
+            )
+          else
+            GrilleBoutons(
+              colonnes: 4,
+              espace: 8,
+              enfants: [
+                for (final a in favoris)
+                  Tuile(
+                    icone: a.icone,
+                    texte: a.nom,
+                    couleur: a.couleur,
+                    onTap: () {
+                      HapticFeedback.selectionClick();
+                      lancerAction(context, cx, a);
+                    },
+                  ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _actions(BuildContext context, EtatPC e) {
     return Carte(
       child: Column(
@@ -264,9 +309,10 @@ class EcranAccueil extends StatelessWidget {
             enfants: [
               BoutonAction(icone: Icons.lock_rounded, texte: 'Verrou', onTap: () => cx.cmd('VERROU')),
               BoutonAction(
-                  icone: Icons.desktop_access_disabled_rounded,
-                  texte: 'Écran PC',
-                  onTap: () => cx.cmd('ECRAN_OFF')),
+                  icone: e.ecranNoir ? Icons.desktop_windows_rounded : Icons.desktop_access_disabled_rounded,
+                  texte: e.ecranNoir ? 'Rallumer' : 'Écran noir',
+                  couleur: e.ecranNoir ? Couleurs.orange : Couleurs.cyan,
+                  onTap: () => cx.cmd('ECRAN_BASCULE')),
               BoutonAction(
                 icone: e.ecranEsp ? Icons.lightbulb_rounded : Icons.lightbulb_outline_rounded,
                 texte: 'ESP32',

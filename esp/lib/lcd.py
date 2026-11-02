@@ -48,7 +48,9 @@ class Ecran:
         self._lettre = bytearray(8)
         self._lettre_fb = framebuf.FrameBuffer(self._lettre, 8, 8, framebuf.MONO_HLSB)
         self._demarrer()
-        self.luminosite(80)
+        # Phase 7 : rétroéclairage éteint au démarrage. Il ne s'allume qu'après la 1re
+        # vraie image (plus de flash gris quand la carte redémarre, PC éteint).
+        self.luminosite(0)
 
     # --- bas niveau -------------------------------------------------------
     def _cmd(self, commande, donnees=None):

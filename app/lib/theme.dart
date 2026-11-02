@@ -131,9 +131,13 @@ class Titre extends StatelessWidget {
             Icon(icone, size: 18, color: Couleurs.cyan),
             const SizedBox(width: 8),
           ],
-          Text(
-            texte,
-            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white),
+          Flexible(
+            child: Text(
+              texte,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white),
+            ),
           ),
         ],
       ),
@@ -211,5 +215,152 @@ class GrilleBoutons extends StatelessWidget {
       ));
     }
     return Column(children: lignes);
+  }
+}
+
+/// Fenêtre « Es-tu sûr ? ». Renvoie true si l'utilisateur confirme.
+Future<bool> confirmer(BuildContext context, String titre, String texte,
+    {String bouton = 'Confirmer', Color? couleur}) async {
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      backgroundColor: const Color(0xFF1A1438),
+      title: Text(titre),
+      content: SingleChildScrollView(child: Text(texte)),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Annuler')),
+        FilledButton(
+          style: couleur == null ? null : FilledButton.styleFrom(backgroundColor: couleur),
+          onPressed: () => Navigator.pop(context, true),
+          child: Text(bouton),
+        ),
+      ],
+    ),
+  );
+  return ok == true;
+}
+
+/// Tuile carrée d'une grille (app, raccourci, action) : icône + nom sur 2 lignes au plus.
+/// Une petite étoile si c'est un favori. Appui long = menu (favori, modifier, supprimer).
+class Tuile extends StatelessWidget {
+  final IconData icone;
+  final String texte;
+  final Color couleur;
+  final bool favori;
+  final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
+
+  const Tuile({
+    super.key,
+    required this.icone,
+    required this.texte,
+    this.couleur = Couleurs.cyan,
+    this.favori = false,
+    this.onTap,
+    this.onLongPress,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white.withValues(alpha: 0.06),
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        onLongPress: onLongPress,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(6, 12, 6, 10),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              SizedBox(
+                width: 34,
+                height: 30,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  alignment: Alignment.center,
+                  children: [
+                    Icon(icone, color: couleur, size: 26),
+                    if (favori)
+                      const Positioned(
+                        right: -4,
+                        top: -4,
+                        child: Icon(Icons.star_rounded, size: 14, color: Couleurs.orange),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                texte,
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Couleurs.doux),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Barre d'onglets compacte (le texte se réduit au lieu de déborder).
+class Onglets extends StatelessWidget {
+  final List<(IconData, String)> onglets;
+  final int choisi;
+  final ValueChanged<int> onChange;
+
+  const Onglets({super.key, required this.onglets, required this.choisi, required this.onChange});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          for (var i = 0; i < onglets.length; i++)
+            Expanded(
+              child: Material(
+                color: i == choisi ? Couleurs.cyan.withValues(alpha: 0.2) : Colors.transparent,
+                borderRadius: BorderRadius.circular(10),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(10),
+                  onTap: () => onChange(i),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 4),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(onglets[i].$1, size: 16, color: i == choisi ? Couleurs.cyan : Couleurs.gris),
+                        const SizedBox(width: 5),
+                        Flexible(
+                          child: Text(
+                            onglets[i].$2,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: i == choisi ? Colors.white : Couleurs.gris,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
   }
 }

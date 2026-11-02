@@ -1,9 +1,14 @@
-// Volume, musique, luminosité, applications et alimentation du PC.
+// Contrôles (Phase 7) : son, luminosité (PC + ESP32), et un lanceur rangé en onglets
+// Raccourcis / Apps / PC, avec recherche, pour rester lisible même avec beaucoup d'éléments.
+// Appui court = lancer ; appui long = favori, modifier, supprimer.
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../actions.dart';
 import '../connexion.dart';
+import '../etat.dart';
 import '../theme.dart';
+import 'editeur_raccourci.dart';
 
 class EcranControles extends StatefulWidget {
   final Connexion cx;
@@ -17,238 +22,402 @@ class EcranControles extends StatefulWidget {
 class _EcranControlesState extends State<EcranControles> {
   double? _volume; // valeur pendant qu'on fait glisser
   double _luminosite = 70;
-  bool _modifier = false; // mode « retirer des apps »
+  double? _lumEsp;
+  int _onglet = 0; // 0 raccourcis, 1 apps, 2 PC
+  final _recherche = TextEditingController();
 
   Connexion get cx => widget.cx;
+
+  @override
+  void dispose() {
+    _recherche.dispose();
+    super.dispose();
+  }
 
   void _envoyer(String ligne) {
     HapticFeedback.selectionClick();
     cx.cmd(ligne);
   }
 
-  Future<void> _confirmer(String titre, String texte, String commande) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1A1438),
-        title: Text(titre),
-        content: Text(texte),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Annuler')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Confirmer')),
-        ],
-      ),
-    );
-    if (ok == true) _envoyer(commande);
-  }
+  int _colonnes(BuildContext context) => MediaQuery.sizeOf(context).width > 560 ? 5 : 3;
 
   @override
   Widget build(BuildContext context) {
     final e = cx.etat;
-    final volume = _volume ?? (e.vol >= 0 ? e.vol.toDouble() : 50);
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
       children: [
-        Carte(
-          jeu: e.enJeu,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Titre('Son  ${volume.round()} %', icone: Icons.volume_up_rounded),
-              Slider(
-                value: volume.clamp(0.0, 100.0).toDouble(),
-                max: 100,
-                onChanged: (v) => setState(() => _volume = v),
-                onChangeEnd: (v) {
-                  _envoyer('VOL ${v.round()}');
-                  Future.delayed(const Duration(milliseconds: 800), () {
-                    if (mounted) setState(() => _volume = null);
-                  });
-                },
-              ),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  _rond(Icons.volume_off_rounded, () => _envoyer('MUTE')),
-                  _rond(Icons.skip_previous_rounded, () => _envoyer('PREV')),
-                  _rond(Icons.play_arrow_rounded, () => _envoyer('PLAY'), grand: true),
-                  _rond(Icons.skip_next_rounded, () => _envoyer('NEXT')),
-                ],
-              ),
-            ],
-          ),
-        ),
+        _carteSon(e),
         const SizedBox(height: 14),
-        Carte(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Titre('Luminosité  ${_luminosite.round()} %', icone: Icons.light_mode_rounded),
-              Slider(
-                value: _luminosite,
-                max: 100,
-                divisions: 20,
-                onChanged: (v) => setState(() => _luminosite = v),
-                onChangeEnd: (v) => _envoyer('LUM ${v.round()}'),
-              ),
-            ],
-          ),
-        ),
+        _carteLuminosite(e),
         const SizedBox(height: 14),
-        _carteApps(),
-        const SizedBox(height: 14),
-        Carte(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Titre('Alimentation', icone: Icons.power_settings_new_rounded),
-              GrilleBoutons(
-                colonnes: 3,
-                enfants: [
-                  BoutonAction(icone: Icons.lock_rounded, texte: 'Verrouiller', onTap: () => _envoyer('VERROU')),
-                  BoutonAction(
-                      icone: Icons.desktop_access_disabled_rounded,
-                      texte: 'Éteindre\nl\'écran',
-                      onTap: () => _envoyer('ECRAN_OFF')),
-                  BoutonAction(
-                    icone: Icons.bedtime_rounded,
-                    texte: 'Veille',
-                    couleur: Couleurs.orange,
-                    onTap: () => _confirmer(
-                        'Mettre en veille ?', 'Le PC va se mettre en veille tout de suite.', 'VEILLE'),
-                  ),
-                  BoutonAction(
-                    icone: Icons.power_settings_new_rounded,
-                    texte: 'Éteindre\nle PC',
-                    couleur: Couleurs.rouge,
-                    onTap: () => _confirmer('Éteindre le PC ?',
-                        'Le PC s\'éteindra dans 60 secondes. Tu pourras encore annuler.', 'ARRET'),
-                  ),
-                  BoutonAction(
-                      icone: Icons.cancel_rounded,
-                      texte: 'Annuler\nl\'arrêt',
-                      onTap: () => _envoyer('ANNULER')),
-                  BoutonAction(
-                    icone: e.ecranEsp ? Icons.lightbulb_rounded : Icons.lightbulb_outline_rounded,
-                    texte: 'Écran\nESP32',
-                    couleur: e.ecranEsp ? Couleurs.orange : Couleurs.gris,
-                    onTap: () => _envoyer(e.ecranEsp ? 'ECRAN_ESP 0' : 'ECRAN_ESP 1'),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
+        _carteLanceur(e),
       ],
     );
   }
 
-  // ------------------------------------------------------------- applications
-  Widget _carteApps() {
+  // ------------------------------------------------------------- son
+  Widget _carteSon(EtatPC e) {
+    final volume = _volume ?? (e.vol >= 0 ? e.vol.toDouble() : 50);
+    return Carte(
+      jeu: e.enJeu,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Titre('Son  ${volume.round()} %', icone: Icons.volume_up_rounded),
+          Slider(
+            value: volume.clamp(0.0, 100.0).toDouble(),
+            max: 100,
+            onChanged: (v) => setState(() => _volume = v),
+            onChangeEnd: (v) {
+              _envoyer('VOL ${v.round()}');
+              Future.delayed(const Duration(milliseconds: 800), () {
+                if (mounted) setState(() => _volume = null);
+              });
+            },
+          ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              _rond(Icons.volume_off_rounded, () => _envoyer('MUTE')),
+              _rond(Icons.skip_previous_rounded, () => _envoyer('PREV')),
+              _rond(Icons.play_arrow_rounded, () => _envoyer('PLAY'), grand: true),
+              _rond(Icons.skip_next_rounded, () => _envoyer('NEXT')),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------- luminosité
+  Widget _carteLuminosite(EtatPC e) {
+    final lumEsp = _lumEsp ?? (e.lumEsp > 0 ? e.lumEsp.toDouble() : 85);
     return Carte(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              const Expanded(child: Titre('Applications', icone: Icons.apps_rounded)),
-              IconButton(
-                tooltip: 'Ajouter',
-                icon: const Icon(Icons.add_circle_rounded, color: Couleurs.cyan),
-                onPressed: cx.connecte ? _ajouterApp : null,
-              ),
-              IconButton(
-                tooltip: _modifier ? 'Terminé' : 'Retirer des apps',
-                icon: Icon(_modifier ? Icons.check_rounded : Icons.edit_rounded,
-                    color: _modifier ? Couleurs.vert : Couleurs.gris),
-                onPressed: cx.apps.isEmpty && !_modifier ? null : () => setState(() => _modifier = !_modifier),
-              ),
+          const Titre('Luminosité', icone: Icons.light_mode_rounded),
+          _ligneReglage(
+            'PC',
+            _luminosite,
+            0,
+            (v) => setState(() => _luminosite = v),
+            (v) => _envoyer('LUM ${v.round()}'),
+          ),
+          _ligneReglage(
+            'ESP32',
+            lumEsp.clamp(5.0, 100.0).toDouble(),
+            5,
+            (v) => setState(() => _lumEsp = v),
+            (v) {
+              _envoyer('LUM_ESP ${v.round()}');
+              Future.delayed(const Duration(milliseconds: 1500), () {
+                if (mounted) setState(() => _lumEsp = null);
+              });
+            },
+            fin: IconButton(
+              tooltip: e.ecranEsp ? 'Éteindre l\'écran de l\'ESP32' : 'Allumer l\'écran de l\'ESP32',
+              icon: Icon(e.ecranEsp ? Icons.lightbulb_rounded : Icons.lightbulb_outline_rounded,
+                  color: e.ecranEsp ? Couleurs.orange : Couleurs.gris),
+              onPressed: () => _envoyer(e.ecranEsp ? 'ECRAN_ESP 0' : 'ECRAN_ESP 1'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _ligneReglage(String nom, double valeur, double min, ValueChanged<double> onChanged,
+      ValueChanged<double> onChangeEnd,
+      {Widget? fin}) {
+    return Row(
+      children: [
+        SizedBox(
+          width: 52,
+          child: Text(nom,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w700, color: Couleurs.doux)),
+        ),
+        Expanded(
+          child: Slider(value: valeur, min: min, max: 100, onChanged: onChanged, onChangeEnd: onChangeEnd),
+        ),
+        SizedBox(
+          width: 44,
+          child: Text('${valeur.round()} %',
+              maxLines: 1,
+              overflow: TextOverflow.fade,
+              softWrap: false,
+              textAlign: TextAlign.right,
+              style: const TextStyle(fontSize: 12, color: Couleurs.gris)),
+        ),
+        ?fin,
+      ],
+    );
+  }
+
+  // ------------------------------------------------------------- lanceur
+  Widget _carteLanceur(EtatPC e) {
+    final contenu = switch (_onglet) {
+      0 => _ongletRaccourcis(),
+      1 => _ongletApps(),
+      _ => _ongletPc(e),
+    };
+    return Carte(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Onglets(
+            onglets: [
+              (Icons.bolt_rounded, 'Raccourcis'),
+              (Icons.apps_rounded, 'Apps'),
+              (Icons.power_settings_new_rounded, 'PC'),
             ],
+            choisi: _onglet,
+            onChange: (i) => setState(() {
+              _onglet = i;
+              _recherche.clear();
+            }),
           ),
-          if (cx.apps.isEmpty)
-            const Text('Aucune app pour l\'instant. Touche + pour ajouter un lien web ou un programme du PC.',
-                style: TextStyle(color: Couleurs.gris))
-          else
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: [
-                for (final app in cx.apps) _puceApp(app),
-              ],
-            ),
-          if (_modifier && cx.apps.isNotEmpty)
-            const Padding(
-              padding: EdgeInsets.only(top: 10),
-              child: Text('Touche la croix d\'une app pour la retirer.',
-                  style: TextStyle(color: Couleurs.gris, fontSize: 12)),
-            ),
+          const SizedBox(height: 12),
+          contenu,
         ],
       ),
     );
   }
 
-  Widget _puceApp(AppPc app) {
-    final icone = app.web
-        ? Icons.public_rounded
-        : app.type == 'chemin'
-            ? Icons.folder_open_rounded
-            : Icons.rocket_launch_rounded;
-    final nom = app.nom.isEmpty ? app.nom : app.nom[0].toUpperCase() + app.nom.substring(1);
-    final fond = Colors.white.withValues(alpha: 0.07);
-    final bord = BorderSide(color: Colors.white.withValues(alpha: 0.12));
-    if (_modifier) {
-      return InputChip(
-        avatar: Icon(icone, size: 18, color: Couleurs.gris),
-        label: Text(nom, style: const TextStyle(fontWeight: FontWeight.w600)),
-        backgroundColor: fond,
-        side: bord,
-        deleteIcon: const Icon(Icons.close_rounded, size: 18, color: Couleurs.rouge),
-        onDeleted: () => _retirerApp(app),
+  /// Barre « recherche + bouton Ajouter » (la recherche n'apparaît qu'avec beaucoup d'éléments).
+  Widget _barre({required int nombre, required String texteAjout, required VoidCallback? ajouter}) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        children: [
+          Expanded(
+            child: nombre > 6
+                ? TextField(
+                    controller: _recherche,
+                    onChanged: (_) => setState(() {}),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      hintText: 'Rechercher',
+                      prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                      suffixIcon: _recherche.text.isEmpty
+                          ? null
+                          : IconButton(
+                              icon: const Icon(Icons.close_rounded, size: 18),
+                              onPressed: () => setState(_recherche.clear),
+                            ),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                  )
+                : Text(
+                    'Appui long : favori, modifier, supprimer',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Couleurs.gris, fontSize: 12),
+                  ),
+          ),
+          const SizedBox(width: 8),
+          IconButton.filledTonal(
+            tooltip: texteAjout,
+            icon: const Icon(Icons.add_rounded),
+            onPressed: ajouter,
+          ),
+        ],
+      ),
+    );
+  }
+
+  bool _correspond(String nom) {
+    final r = _recherche.text.trim().toLowerCase();
+    return r.isEmpty || nom.toLowerCase().contains(r);
+  }
+
+  Widget _grille(List<Widget> tuiles) {
+    return GrilleBoutons(colonnes: _colonnes(context), espace: 8, enfants: tuiles);
+  }
+
+  Widget _vide(String texte) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Text(texte, style: const TextStyle(color: Couleurs.gris)),
       );
-    }
-    return Tooltip(
-      message: app.cible,
-      child: ActionChip(
-        avatar: Icon(icone, size: 18, color: Couleurs.cyan),
-        label: Text(nom, style: const TextStyle(fontWeight: FontWeight.w600)),
-        backgroundColor: fond,
-        side: bord,
-        onPressed: () => _envoyer('APP ${app.nom}'),
-      ),
+
+  // --- raccourcis
+  Widget _ongletRaccourcis() {
+    final liste = cx.raccourcis.where((r) => _correspond(r.nom)).toList();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _barre(
+          nombre: cx.raccourcis.length,
+          texteAjout: 'Nouveau raccourci',
+          ajouter: cx.connecte ? () => _editerRaccourci(null) : null,
+        ),
+        if (cx.raccourcis.isEmpty)
+          _vide('Aucun raccourci. Touche + pour en créer un : touches (ex. Ctrl + 6), '
+              'commande administrateur, texte, app… en un seul appui.')
+        else if (liste.isEmpty)
+          _vide('Aucun résultat.')
+        else
+          _grille([
+            for (final r in liste)
+              _tuile(actionRaccourci(r),
+                  modifier: () => _editerRaccourci(r), supprimer: () => _supprimerRaccourci(r)),
+          ]),
+      ],
     );
   }
 
-  Future<void> _retirerApp(AppPc app) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1A1438),
-        title: Text('Retirer « ${app.nom} » ?'),
-        content: Text(app.cible.isEmpty ? 'L\'app disparaîtra de la liste.' : app.cible),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Annuler')),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Couleurs.rouge),
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Retirer'),
-          ),
-        ],
-      ),
-    );
-    if (ok == true) {
-      HapticFeedback.selectionClick();
-      cx.retirerApp(app.nom);
-    }
+  Future<void> _editerRaccourci(Raccourci? r) async {
+    await Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => EditeurRaccourci(cx: cx, existant: r),
+    ));
   }
 
-  Future<void> _ajouterApp() async {
+  Future<void> _supprimerRaccourci(Raccourci r) async {
+    final ok = await confirmer(context, 'Supprimer « ${r.nom} » ?', 'Le raccourci disparaîtra du PC.',
+        bouton: 'Supprimer', couleur: Couleurs.rouge);
+    if (ok) await cx.retirerRaccourci(r.nom);
+  }
+
+  // --- apps
+  Widget _ongletApps() {
+    final liste = cx.apps.where((a) => _correspond(a.nom)).toList();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _barre(nombre: cx.apps.length, texteAjout: 'Ajouter une app', ajouter: cx.connecte ? () => _editerApp(null) : null),
+        if (cx.apps.isEmpty)
+          _vide('Aucune app pour l\'instant. Touche + pour ajouter un lien web ou un programme du PC.')
+        else if (liste.isEmpty)
+          _vide('Aucun résultat.')
+        else
+          _grille([
+            for (final a in liste)
+              _tuile(actionApp(a), modifier: () => _editerApp(a), supprimer: () => _supprimerApp(a)),
+          ]),
+      ],
+    );
+  }
+
+  Future<void> _editerApp(AppPc? app) async {
     final resultat = await showDialog<(String, String, String)>(
       context: context,
-      builder: (context) => const _DialogueApp(),
+      builder: (context) => _DialogueApp(existante: app),
     );
-    if (resultat != null) {
+    if (resultat == null) return;
+    HapticFeedback.selectionClick();
+    await cx.ajouterApp(resultat.$1, resultat.$2, resultat.$3, ancien: app?.nom ?? '');
+  }
+
+  Future<void> _supprimerApp(AppPc app) async {
+    final ok = await confirmer(context, 'Retirer « ${app.nom} » ?',
+        app.cible.isEmpty ? 'L\'app disparaîtra de la liste.' : app.cible,
+        bouton: 'Retirer', couleur: Couleurs.rouge);
+    if (ok) {
       HapticFeedback.selectionClick();
-      cx.ajouterApp(resultat.$1, resultat.$2, resultat.$3);
+      await cx.retirerApp(app.nom);
+    }
+  }
+
+  // --- PC
+  Widget _ongletPc(EtatPC e) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (e.arretPrevu)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: BandeauArret(secondes: e.arret, onAnnuler: () => _envoyer('ANNULER')),
+          ),
+        const Padding(
+          padding: EdgeInsets.only(bottom: 10),
+          child: Text('Appui long : ajouter aux favoris (Accueil et widget).',
+              style: TextStyle(color: Couleurs.gris, fontSize: 12)),
+        ),
+        _grille([
+          for (final a in actionsPc)
+            if (a.id == 'cmd:ECRAN_BASCULE')
+              _tuile(ActionDadou(
+                id: a.id,
+                nom: e.ecranNoir ? 'Rallumer l\'écran' : 'Écran noir',
+                icone: e.ecranNoir ? Icons.desktop_windows_rounded : a.icone,
+                ligne: a.ligne,
+                code: a.code,
+                couleur: e.ecranNoir ? Couleurs.orange : a.couleur,
+              ))
+            else
+              _tuile(a),
+        ]),
+      ],
+    );
+  }
+
+  // --- tuile commune + menu de l'appui long
+  Widget _tuile(ActionDadou a, {VoidCallback? modifier, VoidCallback? supprimer}) {
+    return Tuile(
+      icone: a.icone,
+      texte: a.nom,
+      couleur: a.couleur,
+      favori: cx.estFavori(a.id),
+      onTap: cx.connecte
+          ? () {
+              HapticFeedback.selectionClick();
+              lancerAction(context, cx, a);
+            }
+          : null,
+      onLongPress: () => _menu(a, modifier: modifier, supprimer: supprimer),
+    );
+  }
+
+  Future<void> _menu(ActionDadou a, {VoidCallback? modifier, VoidCallback? supprimer}) async {
+    HapticFeedback.mediumImpact();
+    final favori = cx.estFavori(a.id);
+    final choix = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: const Color(0xFF1A1438),
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Icon(a.icone, color: a.couleur),
+              title: Text(a.nom, maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w700)),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: Icon(favori ? Icons.star_outline_rounded : Icons.star_rounded, color: Couleurs.orange),
+              title: Text(favori ? 'Retirer des favoris' : 'Ajouter aux favoris'),
+              subtitle: const Text('Accueil et widget du téléphone'),
+              onTap: () => Navigator.pop(context, 'favori'),
+            ),
+            if (modifier != null)
+              ListTile(
+                leading: const Icon(Icons.edit_rounded, color: Couleurs.cyan),
+                title: const Text('Modifier'),
+                onTap: () => Navigator.pop(context, 'modifier'),
+              ),
+            if (supprimer != null)
+              ListTile(
+                leading: const Icon(Icons.delete_rounded, color: Couleurs.rouge),
+                title: const Text('Supprimer'),
+                onTap: () => Navigator.pop(context, 'supprimer'),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted) return;
+    switch (choix) {
+      case 'favori':
+        cx.basculerFavori(a.id);
+      case 'modifier':
+        modifier?.call();
+      case 'supprimer':
+        supprimer?.call();
     }
   }
 
@@ -270,19 +439,68 @@ class _EcranControlesState extends State<EcranControles> {
   }
 }
 
-/// Fenêtre « Ajouter une app » : un nom + un lien web ou un chemin Windows.
+/// Bandeau « Arrêt du PC dans 42 s » avec un bouton Annuler (Accueil et Contrôles).
+class BandeauArret extends StatelessWidget {
+  final int secondes;
+  final VoidCallback onAnnuler;
+
+  const BandeauArret({super.key, required this.secondes, required this.onAnnuler});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
+      decoration: BoxDecoration(
+        color: Couleurs.rouge.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Couleurs.rouge.withValues(alpha: 0.7)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.power_settings_new_rounded, color: Couleurs.rouge),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text('Arrêt du PC dans $secondes s',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w700)),
+          ),
+          const SizedBox(width: 8),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Couleurs.rouge),
+            onPressed: onAnnuler,
+            child: const Text('Annuler'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Fenêtre « Ajouter / modifier une app » : un nom + un lien web ou un chemin Windows.
 class _DialogueApp extends StatefulWidget {
-  const _DialogueApp();
+  final AppPc? existante;
+
+  const _DialogueApp({this.existante});
 
   @override
   State<_DialogueApp> createState() => _DialogueAppState();
 }
 
 class _DialogueAppState extends State<_DialogueApp> {
-  final _nom = TextEditingController();
-  final _cible = TextEditingController();
-  String _sorte = 'web';
+  late final TextEditingController _nom;
+  late final TextEditingController _cible;
+  late String _sorte;
   String? _erreur;
+
+  @override
+  void initState() {
+    super.initState();
+    final a = widget.existante;
+    _nom = TextEditingController(text: a?.nom ?? '');
+    _cible = TextEditingController(text: a?.cible ?? '');
+    _sorte = a != null && a.type == 'chemin' ? 'chemin' : 'web';
+  }
 
   @override
   void dispose() {
@@ -321,22 +539,20 @@ class _DialogueAppState extends State<_DialogueApp> {
   @override
   Widget build(BuildContext context) {
     final web = _sorte == 'web';
+    final modification = widget.existante != null;
     return AlertDialog(
       backgroundColor: const Color(0xFF1A1438),
-      title: const Text('Ajouter une app'),
+      title: Text(modification ? 'Modifier l\'app' : 'Ajouter une app'),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            SegmentedButton<String>(
-              segments: const [
-                ButtonSegment(value: 'web', icon: Icon(Icons.public_rounded), label: Text('Lien web')),
-                ButtonSegment(value: 'chemin', icon: Icon(Icons.folder_open_rounded), label: Text('Windows')),
-              ],
-              selected: {_sorte},
-              onSelectionChanged: (s) => setState(() {
-                _sorte = s.first;
+            Onglets(
+              onglets: const [(Icons.public_rounded, 'Lien web'), (Icons.folder_open_rounded, 'Windows')],
+              choisi: web ? 0 : 1,
+              onChange: (i) => setState(() {
+                _sorte = i == 0 ? 'web' : 'chemin';
                 _erreur = null;
               }),
             ),
@@ -357,9 +573,9 @@ class _DialogueAppState extends State<_DialogueApp> {
                 hintText: web ? 'https://www.netflix.com' : r'C:\Program Files\…\jeu.exe',
                 helperText: web
                     ? 'S\'ouvre dans le navigateur du PC.'
-                    : 'Programme, fichier ou dossier. Astuce : clic droit sur le fichier\n'
+                    : 'Programme, fichier ou dossier. Astuce : clic droit sur le fichier '
                         '→ « Copier en tant que chemin », puis colle-le ici.',
-                helperMaxLines: 3,
+                helperMaxLines: 4,
               ),
               onSubmitted: (_) => _valider(),
             ),
@@ -373,7 +589,7 @@ class _DialogueAppState extends State<_DialogueApp> {
       ),
       actions: [
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('Annuler')),
-        FilledButton(onPressed: _valider, child: const Text('Ajouter')),
+        FilledButton(onPressed: _valider, child: Text(modification ? 'Enregistrer' : 'Ajouter')),
       ],
     );
   }

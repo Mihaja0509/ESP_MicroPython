@@ -94,6 +94,8 @@ class Interface:
         self.bulle = None        # icône dans la bulle près de la tête
         self.prochain_clin = time.ticks_add(time.ticks_ms(), 3000)
         self.valeurs = {}        # valeurs affichées, qui glissent vers les vraies valeurs
+        self.lum = 85            # luminosité choisie dans l'app (etat["lum"])
+        self.noir_affiche = False  # mode « éteint » : l'image noire est déjà sur l'écran
 
     # ------------------------------------------------------------------ outils
     def _couleur(self, rgb):
@@ -122,23 +124,37 @@ class Interface:
         return int(nouveau + 0.5)
 
     def luminosite_voulue(self, maintenant):
+        """Luminosité du rétroéclairage. Les niveaux suivent celle choisie dans l'app
+        (85 = réglage d'origine : verrou 35, absent 30 puis 6)."""
         age = self._age(self.mode_depuis, maintenant)
+        lum = self.lum
+        if self.mode == "eteint":
+            return 0
         if self.mode == "absent":
-            return 30 if age < 120000 else 6
+            return max(4, lum * 30 // 85) if age < 120000 else max(2, lum * 6 // 85)
         if self.mode == "verrou":
-            return 35
-        return 85
+            return max(5, lum * 35 // 85)
+        return lum
 
     # ------------------------------------------------------------------ dessin
     def dessiner(self, etat, maintenant):
+        self.lum = etat.get("lum", 85)
         mode = self._choisir_mode(etat)
         if mode != self.mode:
             self._changer_mode(self.mode, mode, etat, maintenant)
+        if mode == "eteint":
+            # écran noir, dessiné une seule fois (le rétroéclairage est à 0)
+            if not self.noir_affiche:
+                self.fb.fill(0)
+                self.ecran.afficher()
+                self.noir_affiche = True
+            return
+        self.noir_affiche = False
         t = maintenant / 1000
         fb = self.fb
         if mode == "jeu":
             fond, carte = "jeu", CARTE_JEU
-        elif mode in ("absent", "verrou"):
+        elif mode in ("absent", "verrou", "arret"):
             fond, carte = "nuit", CARTE_NUIT
         else:
             fond, carte = "jour", CARTE_JOUR
@@ -148,6 +164,8 @@ class Interface:
             self._scene_jeu(etat, carte)
         elif mode == "normal":
             self._scene_normale(etat, carte, maintenant)
+        elif mode == "arret":
+            self._scene_arret(etat, carte, maintenant)
         else:
             self._scene_nuit(etat, carte, mode)
         self._mascotte(etat, mode, t, maintenant)
@@ -155,6 +173,10 @@ class Interface:
         self.ecran.afficher()
 
     def _choisir_mode(self, etat):
+        if etat.get("eteint"):
+            return "eteint"
+        if etat.get("arret_fin") is not None:
+            return "arret"
         if not etat["connecte"]:
             return "absent"
         if etat["evt"]["verrou"]:
@@ -167,7 +189,15 @@ class Interface:
         duree_ancien = self._age(self.mode_depuis, maintenant)
         self.mode = nouveau
         self.mode_depuis = maintenant
-        if ancien is None:
+        if nouveau == "eteint":
+            self.bandeau = None  # rien ne reste affiché
+        elif ancien == "eteint":
+            self.reagir("coucou", "Bonjour Mihaja !")  # le PC vient de démarrer
+        elif nouveau == "arret":
+            self.reagir("power", "Arrêt du PC")
+        elif ancien == "arret":
+            pass  # arrêt annulé : le bandeau « Arrêt annulé » vient de main.py
+        elif ancien is None:
             self.reagir("coucou", "Bonjour !")
         elif nouveau == "absent":
             # pas de bandeau si on était verrouillé (on dort déjà) ou réveillé quelques secondes
@@ -289,6 +319,25 @@ class Interface:
         if morceaux:
             self.f_xs.ecrire(fb, "   •   ".join(morceaux), 16, 148, GRIS, carte)
 
+    def _scene_arret(self, etat, carte, maintenant):
+        """Compte à rebours avant l'arrêt du PC (annulable depuis l'app)."""
+        fb = self.fb
+        reste = time.ticks_diff(etat["arret_fin"], maintenant)
+        total = max(1000, etat.get("arret_total", 60000))
+        if reste > 0:
+            self.f_s.ecrire(fb, "Arrêt du PC dans", 16, 10, DOUX, carte)
+            secondes = (reste + 999) // 1000
+            x = self.f_fps.ecrire(fb, "%d" % secondes, 14, 30, ORANGE if secondes > 10 else ROUGE, carte)
+            self.f_m.ecrire(fb, "s", x + 6, 74, DOUX, carte)
+            fb.fill_rect(18, 112, 158, 4, rgb565(45, 40, 80))
+            fb.fill_rect(18, 112, 158 * min(reste, total) // total, 4, rgb565(*ORANGE))
+            self.f_xs.ecrire(fb, "Tu peux encore annuler", 16, 126, GRIS, carte)
+            self.f_xs.ecrire(fb, "depuis l'app Dadou.", 16, 142, GRIS, carte)
+        else:
+            self.f_m.ecrire(fb, "Au revoir !", 16, 52, BLANC, carte)
+            self.f_xs.ecrire(fb, "Le PC s'éteint…", 16, 82, DOUX, carte)
+            self.f_xs.ecrire(fb, "À bientôt Mihaja", 16, 100, GRIS, carte)
+
     def _scene_nuit(self, etat, carte, mode):
         fb = self.fb
         self._heure_date(carte, y_heure=4)
@@ -344,11 +393,14 @@ class Interface:
         if pensee:
             fb.blit(self.bulle_manette, PERSO_X - 34, PERSO_Y + 2 + dy // 2, CLE)
         # la petite bulle de réaction n'est pas dessinée par-dessus la bulle « manette »
-        if self.bulle and age_reaction < DUREE_REACTION and not dort and not pensee:
+        bulle = self.bulle if age_reaction < DUREE_REACTION else None
+        if mode == "arret":
+            bulle = "coucou"  # la mascotte fait coucou pendant tout le compte à rebours
+        if bulle and not dort and not pensee:
             cx, cy = PERSO_X - 2, PERSO_Y + 24
             fb.ellipse(cx, cy, 15, 15, rgb565(*CYAN), True)
             fb.ellipse(cx, cy, 13, 13, rgb565(*BLANC), True)
-            ico = self.icones.get(self.bulle)
+            ico = self.icones.get(bulle)
             if ico:
                 fb.blit(ico, cx - 9, cy - 9, CLE)
 

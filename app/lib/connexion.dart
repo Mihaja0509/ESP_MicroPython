@@ -32,12 +32,68 @@ class AppPc {
   }
 }
 
+/// Une étape d'un raccourci (Phase 7).
+/// type : touches | texte | entree | commande | app | pause | action
+class Etape {
+  final String type;
+  final String valeur;
+  final String shell; // commande : powershell | cmd
+  final bool visible; // commande : fenêtre visible
+
+  const Etape(this.type, this.valeur, {this.shell = 'powershell', this.visible = true});
+
+  static Etape depuis(dynamic e) {
+    final m = e is Map ? e : const {};
+    return Etape(
+      (m['type'] ?? 'touches').toString(),
+      (m['valeur'] ?? '').toString(),
+      shell: m['shell'] == 'cmd' ? 'cmd' : 'powershell',
+      visible: m['visible'] != false,
+    );
+  }
+
+  Map<String, dynamic> versJson() => {
+        'type': type,
+        'valeur': valeur,
+        if (type == 'commande') 'shell': shell,
+        if (type == 'commande') 'visible': visible,
+      };
+}
+
+/// Un raccourci : une suite d'étapes lancée d'un seul appui (Phase 7).
+class Raccourci {
+  final String nom;
+  final String icone;
+  final List<Etape> etapes;
+
+  const Raccourci(this.nom, this.icone, this.etapes);
+
+  static Raccourci depuis(dynamic e) {
+    final m = e is Map ? e : const {};
+    final brutes = m['etapes'];
+    return Raccourci(
+      (m['nom'] ?? '').toString(),
+      (m['icone'] ?? 'eclair').toString(),
+      brutes is List ? brutes.map(Etape.depuis).toList() : const [],
+    );
+  }
+
+  Map<String, dynamic> versJson() => {
+        'nom': nom,
+        'icone': icone,
+        'etapes': etapes.map((e) => e.versJson()).toList(),
+      };
+}
+
 class Connexion extends ChangeNotifier {
   String adresse = '';
   String? _token;
   Statut statut = Statut.sansAdresse;
   EtatPC etat = EtatPC.vide();
   List<AppPc> apps = [];
+  List<Raccourci> raccourcis = [];
+  /// Favoris (Accueil + widget) : « app:Nom », « rac:Nom » ou « cmd:LIGNE ».
+  List<String> favoris = [];
   String message = '';
   int numeroMessage = 0; // change à chaque nouveau message (pour afficher une notification)
   bool pinAffiche = false;
@@ -54,9 +110,11 @@ class Connexion extends ChangeNotifier {
   int _echecs = 0;
   DateTime _dernierEtat = DateTime.fromMillisecondsSinceEpoch(0);
   AppLifecycleListener? _cycle;
+  final Map<String, Completer<(bool, String)>> _attentes = {};
 
   bool get appaire => _token != null;
   bool get connecte => statut == Statut.connecte;
+  String? get token => _token;
 
   Future<void> charger() async {
     // retour sur l'app : on se reconnecte tout de suite si la liaison est morte en arrière-plan
@@ -64,8 +122,10 @@ class Connexion extends ChangeNotifier {
     final p = await SharedPreferences.getInstance();
     adresse = p.getString('adresse') ?? '';
     _token = p.getString('token');
+    favoris = p.getStringList('favoris') ?? [];
     statut = adresse.isEmpty ? Statut.sansAdresse : Statut.deconnecte;
     notifyListeners();
+    favorisChanges();
     if (adresse.isNotEmpty) connecter();
   }
 
@@ -73,6 +133,7 @@ class Connexion extends ChangeNotifier {
     adresse = nouvelle.trim();
     final p = await SharedPreferences.getInstance();
     await p.setString('adresse', adresse);
+    favorisChanges();
     connecter();
   }
 
@@ -80,6 +141,7 @@ class Connexion extends ChangeNotifier {
     _token = null;
     final p = await SharedPreferences.getInstance();
     await p.remove('token');
+    favorisChanges();
     connecter();
   }
 
@@ -128,6 +190,10 @@ class Connexion extends ChangeNotifier {
 
   void _perdu() {
     _fermerCanal();
+    for (final c in _attentes.values) {
+      if (!c.isCompleted) c.complete((false, 'Connexion au PC perdue'));
+    }
+    _attentes.clear();
     if (_fini) return;
     if (statut != Statut.sansAdresse) {
       statut = Statut.deconnecte;
@@ -140,7 +206,14 @@ class Connexion extends ChangeNotifier {
     _reconnexion = Timer(Duration(milliseconds: _echecs <= 1 ? 500 : 3000), connecter);
   }
 
+  /// Point d'entrée pour les messages binaires (aperçu de l'écran, Phase 8).
+  void recevoirBinaire(Uint8List octets) {}
+
   void _recevoir(dynamic brut) {
+    if (brut is List<int>) {
+      recevoirBinaire(brut is Uint8List ? brut : Uint8List.fromList(brut));
+      return;
+    }
     Map<String, dynamic> m;
     try {
       m = jsonDecode(brut as String) as Map<String, dynamic>;
@@ -159,12 +232,16 @@ class Connexion extends ChangeNotifier {
         final token = m['token'] as String?;
         if (token != null && token != _token) {
           _token = token;
-          SharedPreferences.getInstance().then((p) => p.setString('token', token));
+          SharedPreferences.getInstance().then((p) async {
+            await p.setString('token', token);
+            favorisChanges();
+          });
         }
         statut = Statut.connecte;
         _echecs = 0;
         pinAffiche = false;
         _envoyer({'type': 'apps'});
+        _envoyer({'type': 'raccourcis'});
       case 'erreur':
         if (_authEnvoyee && statut != Statut.connecte) {
           // le PC ne reconnaît plus ce téléphone : il faut refaire l'appairage
@@ -180,13 +257,29 @@ class Connexion extends ChangeNotifier {
         etat = EtatPC.depuisJson(m);
         _dernierEtat = DateTime.now();
       case 'rep':
-        _annoncer((m['texte'] ?? '').toString());
+        final ligne = (m['ligne'] ?? '').toString();
+        final texte = (m['texte'] ?? '').toString();
+        final attente = _attentes.remove(ligne);
+        if (attente != null && !attente.isCompleted) {
+          attente.complete((m['ok'] != false, texte));
+        }
+        _annoncer(texte);
       case 'apps':
         final liste = m['apps'];
         if (liste is List) apps = liste.map(AppPc.depuis).where((a) => a.nom.isNotEmpty).toList();
+      case 'raccourcis':
+        final liste = m['raccourcis'];
+        if (liste is List) {
+          raccourcis = liste.map(Raccourci.depuis).where((r) => r.nom.isNotEmpty).toList();
+        }
+      default:
+        if (!recevoirAutre(m)) return;
     }
     notifyListeners();
   }
+
+  /// Autres messages (Phase 8). Renvoie true si l'écran doit être redessiné.
+  bool recevoirAutre(Map<String, dynamic> m) => false;
 
   void _annoncer(String texte) {
     if (texte.isEmpty) return;
@@ -194,12 +287,39 @@ class Connexion extends ChangeNotifier {
     numeroMessage++;
   }
 
+  void annoncer(String texte) {
+    _annoncer(texte);
+    notifyListeners();
+  }
+
+  void envoyer(Map<String, dynamic> m) => _envoyer(m);
+
   void _envoyer(Map<String, dynamic> m) {
     final canal = _canal;
     if (canal == null) return;
     try {
       canal.sink.add(jsonEncode(m));
     } catch (_) {}
+  }
+
+  /// Envoie [m] et attend la réponse « rep » du PC (ok, texte).
+  Future<(bool, String)> _demander(Map<String, dynamic> m) {
+    final cle = m['type'] as String;
+    final ancienne = _attentes.remove(cle);
+    if (ancienne != null && !ancienne.isCompleted) {
+      ancienne.complete((false, 'Remplacé par une nouvelle demande'));
+    }
+    final c = Completer<(bool, String)>();
+    _attentes[cle] = c;
+    if (_canal == null) {
+      _attentes.remove(cle);
+      return Future.value((false, 'PC non connecté'));
+    }
+    _envoyer(m);
+    return c.future.timeout(const Duration(seconds: 6), onTimeout: () {
+      _attentes.remove(cle);
+      return (false, 'Le PC ne répond pas');
+    });
   }
 
   // ------------------------------------------------------------- appairage
@@ -217,10 +337,77 @@ class Connexion extends ChangeNotifier {
   void rafraichirApps() => _envoyer({'type': 'apps'});
 
   /// Ajoute une app sur le PC. [sorte] : 'web' (lien) ou 'chemin' (fichier / programme Windows).
-  void ajouterApp(String nom, String cible, String sorte) =>
-      _envoyer({'type': 'app_ajout', 'nom': nom.trim(), 'cible': cible.trim(), 'sorte': sorte});
+  Future<(bool, String)> ajouterApp(String nom, String cible, String sorte, {String ancien = ''}) async {
+    nom = nom.trim();
+    if (ancien.isNotEmpty && ancien.toLowerCase() != nom.toLowerCase()) {
+      final r = await _demander({'type': 'app_retrait', 'nom': ancien});
+      if (!r.$1) return r;
+      _renommerFavori('app:$ancien', 'app:$nom');
+    }
+    return _demander({'type': 'app_ajout', 'nom': nom, 'cible': cible.trim(), 'sorte': sorte});
+  }
 
-  void retirerApp(String nom) => _envoyer({'type': 'app_retrait', 'nom': nom});
+  Future<(bool, String)> retirerApp(String nom) async {
+    final r = await _demander({'type': 'app_retrait', 'nom': nom});
+    if (r.$1) _renommerFavori('app:$nom', null);
+    return r;
+  }
+
+  // ------------------------------------------------------------- raccourcis
+  void lancerRaccourci(String nom) => cmd('RAC $nom');
+
+  Future<(bool, String)> enregistrerRaccourci(Raccourci r, {String ancien = ''}) async {
+    final res = await _demander({'type': 'rac_ajout', 'raccourci': r.versJson(), 'ancien': ancien});
+    if (res.$1 && ancien.isNotEmpty) _renommerFavori('rac:$ancien', 'rac:${r.nom}');
+    return res;
+  }
+
+  Future<(bool, String)> retirerRaccourci(String nom) async {
+    final r = await _demander({'type': 'rac_retrait', 'nom': nom});
+    if (r.$1) _renommerFavori('rac:$nom', null);
+    return r;
+  }
+
+  // ------------------------------------------------------------- favoris
+  bool estFavori(String id) => favoris.contains(id);
+
+  void basculerFavori(String id) {
+    if (favoris.contains(id)) {
+      favoris.remove(id);
+    } else {
+      favoris.add(id);
+    }
+    _sauverFavoris();
+  }
+
+  void deplacerFavori(int ancien, int nouveau) {
+    if (ancien < 0 || ancien >= favoris.length) return;
+    final id = favoris.removeAt(ancien);
+    favoris.insert(nouveau < 0 ? 0 : (nouveau > favoris.length ? favoris.length : nouveau), id);
+    _sauverFavoris();
+  }
+
+  void _renommerFavori(String ancien, String? nouveau) {
+    final i = favoris.indexWhere((f) => f.toLowerCase() == ancien.toLowerCase());
+    if (i < 0) return;
+    if (nouveau == null) {
+      favoris.removeAt(i);
+    } else {
+      favoris[i] = nouveau;
+    }
+    _sauverFavoris();
+  }
+
+  void _sauverFavoris() {
+    notifyListeners();
+    SharedPreferences.getInstance().then((p) async {
+      await p.setStringList('favoris', favoris);
+      favorisChanges();
+    });
+  }
+
+  /// Appelé quand les favoris, l'adresse ou l'appairage changent (widget, Phase 8).
+  void favorisChanges() {}
 
   /// Déplacement de souris : regroupé et envoyé environ 60 fois par seconde.
   void souris(double dx, double dy) {
