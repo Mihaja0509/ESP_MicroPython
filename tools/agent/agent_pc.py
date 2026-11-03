@@ -4,7 +4,7 @@
 - Envoie chaque seconde à l'ESP32 : CPU, RAM, volume, batterie (ligne « STAT »).
 - Envoie chaque seconde la carte graphique NVIDIA : température, charge, mémoire (ligne « GPU »).
 - Surveille et signale : sortie audio (casque ou haut-parleurs), manette, PC verrouillé,
-  jeu Steam en cours (lignes « EVT »).
+  jeu en cours, Steam ou non (lignes « EVT »).
 - Mode gamer : température du processeur (LibreHardwareMonitor) et FPS du jeu (PresentMon),
   ligne « PERF » chaque seconde.
 - Météo d'aujourd'hui et de demain (Open-Meteo) toutes les 30 min, lignes « METEO_J »
@@ -528,6 +528,175 @@ def jeu_steam():
     except OSError:
         pass
     return f"Jeu Steam {appid}"
+
+
+# --- Phase 9 : jeux lancés hors Steam (Rockstar, Epic, .exe lancé à la main…) ---------------
+# Fichier facultatif (créé à la main si besoin, jamais obligatoire) :
+#   tools\agent\jeux.json = {"jeux": ["tennis2.exe"], "pas_des_jeux": ["obs64.exe"]}
+# « jeux » : toujours un jeu ; « pas_des_jeux » : jamais un jeu (faux positif).
+FICHIER_JEUX = DOSSIER / "jeux.json"
+# Un .exe rangé dans un de ces dossiers est un jeu (comparaison en minuscules)
+DOSSIERS_JEUX = ("\\steamapps\\common\\", "\\epic games\\", "\\gog games\\", "\\gog galaxy\\games\\",
+                 "\\xboxgames\\", "\\rockstar games\\", "\\ea games\\", "\\electronic arts\\",
+                 "\\ubisoft game launcher\\games\\", "\\riot games\\", "\\games\\", "\\jeux\\")
+# Ces mots dans le nom du .exe = lanceur ou outil, jamais le jeu lui-même
+MOTS_PAS_JEUX = ("launcher", "unins", "setup", "install", "crash", "report", "redist", "vc_",
+                 "dxsetup", "easyanticheat", "battleye", "helper", "updater", "overlay", "service")
+# Programmes jamais considérés comme des jeux, même en plein écran (vidéo, navigateurs, outils)
+APPS_PAS_JEUX = {
+    "chrome.exe", "msedge.exe", "firefox.exe", "opera.exe", "opera_gx.exe", "brave.exe",
+    "vivaldi.exe", "vlc.exe", "mpc-hc.exe", "mpc-hc64.exe", "mpc-be64.exe", "potplayer64.exe",
+    "potplayermini64.exe", "wmplayer.exe", "video.ui.exe", "microsoft.media.player.exe",
+    "netflix.exe", "wwahost.exe", "applicationframehost.exe", "msedgewebview2.exe",
+    "discord.exe", "obs64.exe", "code.exe", "explorer.exe", "dwm.exe", "python.exe",
+    "pythonw.exe", "steam.exe", "steamwebhelper.exe", "epicgameslauncher.exe",
+    "powerpnt.exe", "winword.exe", "excel.exe", "spotify.exe", "lockapp.exe", "searchhost.exe",
+    "shellexperiencehost.exe", "startmenuexperiencehost.exe", "textinputhost.exe", "taskmgr.exe",
+    "photos.exe", "mstsc.exe",
+}
+GPU_JEU = 30        # % : charge de la carte graphique au-dessus de laquelle le plein écran est un jeu
+CONFIRMER_JEU = 3   # s : la fenêtre doit ressembler à un jeu pendant 3 s de suite
+_U32 = ctypes.WinDLL("user32") if sys.platform == "win32" else None
+if _U32 is not None:
+    _U32.GetForegroundWindow.restype = ctypes.c_void_p
+    _U32.GetWindowThreadProcessId.argtypes = (ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong))
+    _U32.GetWindowRect.argtypes = (ctypes.c_void_p, ctypes.c_void_p)
+    _U32.MonitorFromWindow.argtypes = (ctypes.c_void_p, ctypes.c_ulong)
+    _U32.MonitorFromWindow.restype = ctypes.c_void_p
+    _U32.GetMonitorInfoW.argtypes = (ctypes.c_void_p, ctypes.c_void_p)
+    _U32.GetWindowTextW.argtypes = (ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_int)
+
+
+class _MONITORINFO(ctypes.Structure):
+    _fields_ = [("cbSize", ctypes.c_ulong), ("rcMonitor", _RECT), ("rcWork", _RECT),
+                ("dwFlags", ctypes.c_ulong)]
+
+
+def fenetre_premier_plan():
+    """(fenêtre, pid) de la fenêtre au premier plan, ou (None, 0)."""
+    if _U32 is None:
+        return None, 0
+    hwnd = _U32.GetForegroundWindow()
+    if not hwnd:
+        return None, 0
+    pid = ctypes.c_ulong(0)
+    _U32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    return hwnd, pid.value
+
+
+def fenetre_plein_ecran(hwnd):
+    """Vrai si la fenêtre couvre tout son écran (plein écran ou fenêtré sans bordure)."""
+    r = _RECT()
+    if not _U32.GetWindowRect(hwnd, ctypes.byref(r)):
+        return False
+    hmon = _U32.MonitorFromWindow(hwnd, 2)  # MONITOR_DEFAULTTONEAREST
+    info = _MONITORINFO()
+    info.cbSize = ctypes.sizeof(_MONITORINFO)
+    if not hmon or not _U32.GetMonitorInfoW(hmon, ctypes.byref(info)):
+        return False
+    m = info.rcMonitor
+    return r.left <= m.left and r.top <= m.top and r.right >= m.right and r.bottom >= m.bottom
+
+
+def titre_fenetre(hwnd):
+    tampon = ctypes.create_unicode_buffer(256)
+    _U32.GetWindowTextW(hwnd, tampon, 256)
+    return tampon.value.strip()
+
+
+def charger_jeux():
+    """Listes de tools\\agent\\jeux.json : (toujours des jeux, jamais des jeux), en minuscules."""
+    try:
+        d = json.loads(FICHIER_JEUX.read_text(encoding="utf-8"))
+        if not isinstance(d, dict):
+            d = {}
+    except (OSError, ValueError):
+        d = {}
+
+    def liste(cle):
+        v = d.get(cle, [])
+        return {n.strip().lower() for n in v if isinstance(n, str)} if isinstance(v, list) else set()
+
+    return liste("jeux"), liste("pas_des_jeux")
+
+
+class DetecteurJeu:
+    """Jeu en cours : Steam d'abord, sinon la fenêtre au premier plan si elle ressemble à un jeu
+    (.exe dans un dossier de jeux, ou plein écran avec la carte graphique chargée).
+    Un jeu repéré le reste tant que son programme tourne (même en Alt+Tab)."""
+
+    def __init__(self):
+        self.pid = 0
+        self.exe = ""
+        self.nom = ""
+        self.candidat = (0, 0.0)   # (pid, depuis quand) de la fenêtre qui ressemble à un jeu
+        self.listes = (set(), set())
+        self.listes_lues = 0.0
+
+    def _listes(self):
+        if time.time() - self.listes_lues > 10:
+            self.listes_lues = time.time()
+            self.listes = charger_jeux()
+        return self.listes
+
+    def jeu(self, charge_gpu):
+        """Nom du jeu en cours, '' si aucun. Appelé une fois par seconde."""
+        steam = jeu_steam()
+        if steam:
+            return steam
+        jeux, pas = self._listes()
+        if self.pid:
+            try:
+                if psutil.Process(self.pid).name().lower() == self.exe and self.exe not in pas:
+                    return self.nom
+            except psutil.Error:
+                pass
+            print(f"[agent] fin du jeu : {self.nom}")
+            self.pid, self.exe, self.nom = 0, "", ""
+        hwnd, pid = fenetre_premier_plan()
+        if not hwnd or not pid or pid == os.getpid():
+            self.candidat = (0, 0.0)
+            return ""
+        try:
+            p = psutil.Process(pid)
+            exe = p.name().lower()
+            chemin = p.exe() or ""
+        except psutil.Error:
+            self.candidat = (0, 0.0)
+            return ""
+        if exe in pas or exe in APPS_PAS_JEUX:
+            self.candidat = (0, 0.0)
+            return ""
+        if exe in jeux:
+            return self._retenir(pid, exe, chemin, hwnd)
+        if any(m in exe for m in MOTS_PAS_JEUX):
+            self.candidat = (0, 0.0)
+            return ""
+        dossier_jeu = any(d in chemin.lower() for d in DOSSIERS_JEUX)
+        if dossier_jeu or (charge_gpu >= GPU_JEU and fenetre_plein_ecran(hwnd)):
+            if self.candidat[0] != pid:
+                self.candidat = (pid, time.time())
+            if time.time() - self.candidat[1] >= CONFIRMER_JEU:
+                return self._retenir(pid, exe, chemin, hwnd)
+            return ""
+        self.candidat = (0, 0.0)
+        return ""
+
+    def _retenir(self, pid, exe, chemin, hwnd):
+        nom = titre_fenetre(hwnd)
+        if not (2 <= len(nom) <= 40):
+            m = re.search(r"\\steamapps\\common\\([^\\]+)\\", chemin, re.IGNORECASE)
+            if m:
+                nom = m.group(1)
+            else:  # nom du dossier du jeu (ex. « AO Tennis 2 »), sinon nom du .exe
+                from pathlib import PureWindowsPath
+                c = PureWindowsPath(chemin or exe)
+                nom = next((q.name for q in c.parents if q.name and q.name.lower() not in
+                            ("bin", "bin64", "win64", "x64", "binaries", "game", "retail")), c.stem)
+        self.pid, self.exe, self.nom = pid, exe, nom[:30]
+        self.candidat = (0, 0.0)
+        print(f"[agent] jeu détecté hors Steam : {self.nom} ({exe})")
+        return self.nom
 
 
 class LecteurLHM:
@@ -1480,6 +1649,7 @@ class Agent:
         self.reveil = 0.0        # heure du dernier réveil « tout seul » (veille moderne), 0 = non
         self.lhm = LecteurLHM()
         self.fps = CompteurFPS()
+        self.jeux = DetecteurJeu()   # Phase 9 : jeux hors Steam
         self.arret_fin = 0.0     # heure prévue de l'arrêt du PC (0 = pas d'arrêt)
         self.lum_esp = max(5, min(100, int(charger_preferences().get("lum_esp", 85))))
         self.lent["ecrans"] = 1
@@ -1647,7 +1817,7 @@ class Agent:
                 self.problemes[nom] = outil.probleme
                 print(f"[agent] {nom} : {outil.probleme or 'OK'}")
         nom, externe = sortie_audio()
-        jeu = jeu_steam()
+        jeu = self.jeux.jeu(gpu()[1])
         etats = {
             "CASQUE": nom_court_audio(nom) if externe else "-",
             "MANETTE": "1" if manette_connectee() else "0",
