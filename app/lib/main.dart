@@ -6,6 +6,7 @@ import 'connexion.dart';
 import 'ecrans/accueil.dart';
 import 'ecrans/apercu.dart';
 import 'ecrans/controles.dart';
+import 'ecrans/master.dart';
 import 'ecrans/reglages.dart';
 import 'ecrans/souris.dart';
 import 'theme.dart';
@@ -89,6 +90,7 @@ class _AccueilState extends State<Accueil> {
           EcranAccueil(cx: _cx),
           EcranSouris(cx: _cx),
           EcranApercu(cx: _cx, actif: _onglet == 2),
+          EcranMaster(cx: _cx, actif: _onglet == 3),
           EcranControles(cx: _cx),
           EcranReglages(cx: _cx),
         ];
@@ -99,10 +101,13 @@ class _AccueilState extends State<Accueil> {
             bottomNavigationBar: NavigationBar(
               selectedIndex: _onglet,
               onDestinationSelected: (i) => setState(() => _onglet = i),
+              // 6 onglets : le nom s'affiche seulement sous l'onglet choisi (rien ne déborde)
+              labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
               destinations: const [
                 NavigationDestination(icon: Icon(Icons.home_rounded), label: 'Accueil'),
                 NavigationDestination(icon: Icon(Icons.mouse_rounded), label: 'Souris'),
                 NavigationDestination(icon: Icon(Icons.monitor_rounded), label: 'Écran'),
+                NavigationDestination(icon: Icon(Icons.school_rounded), label: 'Master'),
                 NavigationDestination(icon: Icon(Icons.tune_rounded), label: 'Contrôles'),
                 NavigationDestination(icon: Icon(Icons.settings_rounded), label: 'Réglages'),
               ],

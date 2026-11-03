@@ -1,8 +1,13 @@
 package com.mmdigitek.esp_micro
 
+import android.Manifest
 import android.appwidget.AppWidgetManager
 import android.content.ComponentName
+import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Build
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -33,5 +38,38 @@ class MainActivity : FlutterActivity() {
                     else -> resultat.notImplemented()
                 }
             }
+        // Phase 11 : notification « PC inutilisé » (lib/notifications.dart, VeilleurPC.kt)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "dadou/notif")
+            .setMethodCallHandler { appel, resultat ->
+                when (appel.method) {
+                    "activer" -> {
+                        val actif = appel.argument<Boolean>("actif") ?: false
+                        if (actif) demanderPermission()
+                        VeilleurPC.programmer(applicationContext, actif)
+                        resultat.success(true)
+                    }
+                    "tester" -> {
+                        demanderPermission()
+                        VeilleurPC.tester(applicationContext)
+                        resultat.success(true)
+                    }
+                    else -> resultat.notImplemented()
+                }
+            }
+        // après une mise à jour de l'app, la vérification reprend toute seule
+        val prefs = getSharedPreferences(VeilleurPC.PREFS, Context.MODE_PRIVATE)
+        if (prefs.getBoolean("flutter.notif_actif", false)) {
+            VeilleurPC.programmer(applicationContext, true)
+        }
+    }
+
+    /** Android 13 et plus : il faut l'accord de l'utilisateur pour afficher des notifications. */
+    private fun demanderPermission() {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 42)
+        }
     }
 }

@@ -7,7 +7,9 @@ import '../connexion.dart';
 import '../etat.dart';
 import '../theme.dart';
 import '../widgets/anneau.dart';
+import '../widgets/cinema.dart';
 import '../widgets/mascotte.dart';
+import 'jeux.dart';
 import 'controles.dart' show BandeauArret;
 
 class EcranAccueil extends StatelessWidget {
@@ -29,6 +31,8 @@ class EcranAccueil extends StatelessWidget {
             const SizedBox(height: 14),
           ],
           if (e.enJeu) ...[_carteJeu(e), const SizedBox(height: 14)],
+          if (e.enVideo) ...[CarteCinema(cx: cx, etat: e), const SizedBox(height: 14)],
+          if (e.inactif >= 30) ...[CartePcInutilise(cx: cx, minutes: e.inactif), const SizedBox(height: 14)],
           _carteStats(e),
           const SizedBox(height: 14),
           _favoris(context),
@@ -321,6 +325,12 @@ class EcranAccueil extends StatelessWidget {
               ),
               BoutonAction(
                   icone: Icons.space_dashboard_rounded, texte: 'Bureau', onTap: () => cx.cmd('KEY win+d')),
+              BoutonAction(
+                icone: Icons.sports_esports_rounded,
+                texte: 'Mes jeux',
+                couleur: Couleurs.magenta,
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => EcranJeux(cx: cx))),
+              ),
             ],
           ),
         ],

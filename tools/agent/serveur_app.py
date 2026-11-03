@@ -28,10 +28,18 @@ Messages (JSON, un par message) :
     {"type": "raccourcis", "raccourcis": [{"nom": ..., "icone": ..., "etapes": [...]}, ...]}
     {"type": "apercu_info", "ecran": 0, "ecrans": 1, "largeur": 2560, "hauteur": 1600, "verrou": false}
     puis l'image JPEG en message binaire ; {"type": "apercu_erreur", "texte": "..."}
+  Phase 11 :
+    {"type": "master"} -> {"type": "master", config, auto, temps_jour, chemins_ok, phases, version}
+    {"type": "master_maj", "master": {…partie des réglages…}} -> rep (ligne « master_maj ») + master
+    {"type": "master_afficher"} -> rep : la scène master s'affiche 15 s sur l'ESP32
+    {"type": "jeux"} -> {"type": "jeux", stats, semaine, jeux, pas_des_jeux, en_cours}
+    {"type": "jeux_maj", "jeux": [...], "pas_des_jeux": [...]} et {"type": "pas_un_jeu"} -> rep + jeux
 
 Widget Android (Phase 8) : requête HTTP simple sur le même port, sans WebSocket :
   GET /widget?ligne=PLAY   avec l'en-tête « X-Token: <token du téléphone> »
   -> texte de la réponse (comme dans la console), 401 si le téléphone n'est pas appairé.
+  GET /etat_court (même en-tête, Phase 11) -> JSON {repos_min, verrou, jeu, video, arret}
+  pour la notification « PC inutilisé » du téléphone.
 """
 import asyncio
 import json
@@ -122,10 +130,16 @@ class ServeurApp:
     async def _http(self, connexion, requete):
         """Requêtes HTTP simples (widget Android). None = on continue en WebSocket."""
         morceaux = urllib.parse.urlsplit(requete.path)
-        if morceaux.path != "/widget":
+        if morceaux.path not in ("/widget", "/etat_court"):
             return None
         if not self.token_valide(requete.headers.get("X-Token", "")):
             return connexion.respond(HTTPStatus.UNAUTHORIZED, "Non autorisé\n")
+        if morceaux.path == "/etat_court":
+            try:
+                court = self.r["etat_court"]()
+            except Exception as e:
+                court = {"erreur": str(e)}
+            return connexion.respond(HTTPStatus.OK, json.dumps(court, ensure_ascii=False))
         ligne = (urllib.parse.parse_qs(morceaux.query).get("ligne") or [""])[0].strip()[:200]
         if not ligne:
             return connexion.respond(HTTPStatus.BAD_REQUEST, "Commande vide\n")
@@ -231,6 +245,25 @@ class ServeurApp:
                     if not etat_client["apercu"]:  # sinon on attend la fin de l'image en cours
                         etat_client["apercu"] = True
                         asyncio.create_task(self._apercu(ws, m, etat_client))
+                elif typ == "master":
+                    await self._envoyer(ws, {"type": "master", **self.r["master"]()})
+                elif typ == "master_maj":
+                    ok, texte = await boucle.run_in_executor(None, self.r["master_maj"], m.get("master"))
+                    await self._envoyer(ws, {"type": "rep", "ligne": typ, "texte": texte, "ok": ok})
+                    await self._envoyer(ws, {"type": "master", **self.r["master"]()})
+                elif typ == "master_afficher":
+                    ok, texte = self.r["master_afficher"]()
+                    await self._envoyer(ws, {"type": "rep", "ligne": typ, "texte": texte, "ok": ok})
+                elif typ == "jeux":
+                    await self._envoyer(ws, {"type": "jeux", **self.r["jeux"]()})
+                elif typ in ("jeux_maj", "pas_un_jeu"):
+                    if typ == "jeux_maj":
+                        ok, texte = await boucle.run_in_executor(
+                            None, self.r["jeux_maj"], m.get("jeux"), m.get("pas_des_jeux"))
+                    else:
+                        ok, texte = await boucle.run_in_executor(None, self.r["pas_un_jeu"])
+                    await self._envoyer(ws, {"type": "rep", "ligne": typ, "texte": texte, "ok": ok})
+                    await self._envoyer(ws, {"type": "jeux", **self.r["jeux"]()})
                 elif typ == "pointeur":
                     await boucle.run_in_executor(
                         None, self.r["pointeur"], int(m.get("ecran", 0)), float(m.get("x", 0)),

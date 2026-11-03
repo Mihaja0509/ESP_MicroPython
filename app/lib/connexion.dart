@@ -119,6 +119,11 @@ class Connexion extends ChangeNotifier {
   AppLifecycleListener? _cycle;
   final Map<String, Completer<(bool, String)>> _attentes = {};
 
+  /// Phase 11 : données de l'onglet Master et de la page « Mes jeux » (null = pas encore reçues).
+  Map<String, dynamic>? master;
+  Map<String, dynamic>? jeux;
+  int _masterV = -1;
+
   bool get appaire => _token != null;
   bool get connecte => statut == Statut.connecte;
   String? get token => _token;
@@ -249,6 +254,7 @@ class Connexion extends ChangeNotifier {
         pinAffiche = false;
         _envoyer({'type': 'apps'});
         _envoyer({'type': 'raccourcis'});
+        _envoyer({'type': 'master'});
       case 'erreur':
         if (_authEnvoyee && statut != Statut.connecte) {
           // le PC ne reconnaît plus ce téléphone : il faut refaire l'appairage
@@ -263,6 +269,10 @@ class Connexion extends ChangeNotifier {
       case 'etat':
         etat = EtatPC.depuisJson(m);
         _dernierEtat = DateTime.now();
+        if (etat.masterV != _masterV) {
+          _masterV = etat.masterV;
+          _envoyer({'type': 'master'});
+        }
       case 'rep':
         final ligne = (m['ligne'] ?? '').toString();
         final texte = (m['texte'] ?? '').toString();
@@ -294,6 +304,12 @@ class Connexion extends ChangeNotifier {
         apercuInfos.value = Map<String, dynamic>.from(m);
       case 'apercu_erreur':
         apercuInfos.value = {'erreur': (m['texte'] ?? 'Aperçu impossible').toString()};
+      case 'master':
+        master = Map<String, dynamic>.from(m);
+        return true;
+      case 'jeux':
+        jeux = Map<String, dynamic>.from(m);
+        return true;
     }
     return false;
   }
@@ -348,6 +364,21 @@ class Connexion extends ChangeNotifier {
       return (false, 'Le PC ne répond pas');
     });
   }
+
+  // ------------------------------------------------------------- master et jeux (Phase 11)
+  void demanderMaster() => _envoyer({'type': 'master'});
+
+  Future<(bool, String)> majMaster(Map<String, dynamic> changements) =>
+      _demander({'type': 'master_maj', 'master': changements});
+
+  Future<(bool, String)> afficherMaster() => _demander({'type': 'master_afficher'});
+
+  void demanderJeux() => _envoyer({'type': 'jeux'});
+
+  Future<(bool, String)> majJeux(List<String> jeux, List<String> pasDesJeux) =>
+      _demander({'type': 'jeux_maj', 'jeux': jeux, 'pas_des_jeux': pasDesJeux});
+
+  Future<(bool, String)> pasUnJeu() => _demander({'type': 'pas_un_jeu'});
 
   // ------------------------------------------------------------- appairage
   void demanderPin() => _envoyer({'type': 'demande_pin'});

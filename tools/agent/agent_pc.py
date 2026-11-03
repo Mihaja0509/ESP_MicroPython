@@ -24,6 +24,8 @@
 - Phase 9 : jeux lancés hors Steam (DetecteurJeu, tools\\agent\\jeux.json facultatif).
 - Phase 10 : vidéo au premier plan (EVT VIDEO source|titre), PC inutilisé (EVT INACTIF minutes),
   temps de jeu par jeu et par jour (tools\\agent\\stats_jeux.json, ligne JEU_TOTAL minutes).
+- Phase 11 : suivi du master (master.py : ligne MASTER {json} et MASTER_INFO vers l'ESP32,
+  onglet Master de l'app), page « Mes jeux » de l'app, /etat_court pour la notification Android.
 
 Utilisation (dans le dossier Micro) :
   py -X utf8 tools\\agent\\agent_pc.py            port trouvé tout seul, avec console
@@ -85,6 +87,8 @@ try:
     from serveur_app import PORT as PORT_APP, ServeurApp
 except ImportError:  # websockets pas installé
     PORT_APP, ServeurApp = 8765, None
+
+from master import SuiviMaster  # Phase 11 : suivi du master
 
 DOSSIER = Path(__file__).resolve().parent
 FICHIER_APPS = DOSSIER / "apps.json"
@@ -1821,6 +1825,7 @@ class Agent:
         self.jeux = DetecteurJeu()   # Phase 9 : jeux hors Steam
         self.video = DetecteurVideo()  # Phase 10 : scène cinéma
         self.stats = StatsJeux()       # Phase 10 : temps de jeu par jeu
+        self.master = SuiviMaster(DOSSIER)  # Phase 11 : suivi du master
         self.arret_fin = 0.0     # heure prévue de l'arrêt du PC (0 = pas d'arrêt)
         self.lum_esp = max(5, min(100, int(charger_preferences().get("lum_esp", 85))))
         self.lent["ecrans"] = 1
@@ -1916,6 +1921,12 @@ class Agent:
             "esp": self.liaison.ser is not None, "ecran_esp": self.ecran_esp,
             "arret": self.arret_reste(), "ecran_noir": self.noir.actif,
             "lum_esp": self.lum_esp, "ecrans": self.lent["ecrans"],
+            # Phase 11
+            "video": "" if p.get("VIDEO", "-") == "-" else p.get("VIDEO", "").split("|")[0],
+            "video_titre": p.get("VIDEO", "").partition("|")[2],
+            "inactif": int(p.get("INACTIF", "0") or 0),
+            "jeu_total": p.get("JEU_TOTAL", -1),
+            "master_v": self.master.version, "master_actif": self.master.actif,
         }
         return tour + 1
 
@@ -2013,6 +2024,23 @@ class Agent:
         if jeu and self.precedent.get("JEU_TOTAL") != total:
             self.precedent["JEU_TOTAL"] = total
             self.liaison.envoyer(f"JEU_TOTAL {total}")
+        # Phase 11 : suivi du master (appli au premier plan, échéances, mesures…)
+        hwnd, pid = fenetre_premier_plan()
+        exe = titre = ""
+        if hwnd and pid:
+            try:
+                exe = psutil.Process(pid).name().lower()
+            except psutil.Error:
+                exe = ""
+            titre = titre_fenetre(hwnd)
+        self.master.seconde(exe, titre, repos, bool(jeu) or verrou)
+        for icone, texte in self.master.evenements():
+            self.liaison.envoyer("MASTER_INFO " + json.dumps([icone, texte], ensure_ascii=True))
+            print(f"[agent] master : {texte}")
+        ligne_master = self.master.ligne_esp()
+        if self.precedent.get("MASTER") != ligne_master:
+            self.precedent["MASTER"] = ligne_master
+            self.liaison.envoyer(ligne_master)
 
     # --------------------------------------------------------------- pour l'app
     def executer(self, ligne):
@@ -2100,6 +2128,70 @@ class Agent:
         threading.Thread(target=derouler_raccourci, args=(r, self.executer), daemon=True).start()
         return f"Raccourci : {r['nom']}"
 
+    # --------------------------------------------------------------- Phase 11 : app
+    def jeux_pour_app(self):
+        """Statistiques de jeu, listes de jeux.json et jeu en cours (page « Mes jeux » de l'app)."""
+        jeux, pas = charger_jeux()
+        liste = []
+        for nom, j in list(self.stats.jeux.items()):
+            n = j.get("fps_n", 0)
+            liste.append({"nom": nom, "minutes": int(j.get("secondes", 0) // 60),
+                          "sessions": j.get("sessions", 0),
+                          "fps": round(j.get("fps_total", 0) / n) if n else -1,
+                          "dernier": j.get("dernier", "")})
+        liste.sort(key=lambda j: j["minutes"], reverse=True)
+        semaine = []
+        for k in range(6, -1, -1):
+            jour = time.strftime("%Y-%m-%d", time.localtime(time.time() - k * 86400))
+            secondes = sum(dict(self.stats.jours.get(jour, {})).values())
+            semaine.append({"date": jour, "minutes": int(secondes // 60)})
+        p = self.precedent
+        return {"stats": liste, "semaine": semaine, "jeux": sorted(jeux), "pas_des_jeux": sorted(pas),
+                "en_cours": {"nom": "" if p.get("JEU", "-") == "-" else p.get("JEU"),
+                             "exe": self.jeux.exe}}
+
+    def jeux_maj(self, jeux, pas):
+        """Enregistre tools\\agent\\jeux.json (listes modifiées dans l'app)."""
+        def propre(liste):
+            res = []
+            for n in liste if isinstance(liste, list) else []:
+                n = str(n).strip().strip('"').lower()
+                if n and not n.endswith(".exe"):
+                    n += ".exe"
+                if n and len(n) <= 60 and "\\" not in n and "/" not in n and n not in res:
+                    res.append(n)
+            return res[:100]
+        j = propre(jeux)
+        p = [n for n in propre(pas) if n not in j]
+        try:
+            FICHIER_JEUX.write_text(json.dumps({"jeux": j, "pas_des_jeux": p}, ensure_ascii=False,
+                                               indent=1), encoding="utf-8")
+        except OSError as e:
+            return False, f"jeux.json non enregistré : {e}"
+        self.jeux.listes_lues = 0.0  # relu à la prochaine seconde
+        return True, "Liste des jeux enregistrée"
+
+    def pas_un_jeu(self):
+        """Le jeu détecté hors Steam n'en est pas un : son .exe va dans « pas_des_jeux »."""
+        exe = self.jeux.exe
+        if not exe:
+            return False, "Aucun jeu hors Steam en cours (un jeu Steam ne peut pas être retiré)"
+        jeux, pas = charger_jeux()
+        ok, texte = self.jeux_maj([n for n in jeux if n != exe], sorted(pas | {exe}))
+        return ok, (f"{exe} ne sera plus pris pour un jeu" if ok else texte)
+
+    def etat_court(self):
+        """Pour la notification Android « PC inutilisé » (GET /etat_court)."""
+        p = self.precedent
+        return {"repos_min": int(inactivite() // 60), "verrou": p.get("VERROU") == "1",
+                "jeu": "" if p.get("JEU", "-") == "-" else p.get("JEU"),
+                "video": "" if p.get("VIDEO", "-") == "-" else p.get("VIDEO", "").split("|")[0],
+                "arret": self.arret_reste()}
+
+    def master_afficher(self):
+        self.liaison.envoyer("MASTER_INFO " + json.dumps(["lunettes", "Point sur le master"]))
+        return True, "Scène master affichée sur l'ESP32"
+
     def rappels_app(self):
         def afficher_pin(pin):
             print(f"[agent] code d'appairage : {pin}")
@@ -2125,6 +2217,10 @@ class Agent:
             "souris": souris_pc, "clic": clic_pc, "molette": molette_pc,
             "texte": texte, "connexion": connexion,
             "apercu": capture_ecran, "pointeur": pointeur_pc,
+            "master": self.master.pour_app, "master_maj": self.master.maj,
+            "master_afficher": self.master_afficher,
+            "jeux": self.jeux_pour_app, "jeux_maj": self.jeux_maj, "pas_un_jeu": self.pas_un_jeu,
+            "etat_court": self.etat_court,
         }
 
     def boucle_lecture(self):

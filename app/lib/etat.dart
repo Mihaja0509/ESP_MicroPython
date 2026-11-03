@@ -1,4 +1,5 @@
 // Données reçues du programme PC (message « etat », 4 fois par seconde).
+// Phase 11 : vidéo en cours, inactivité, temps total du jeu, version des données du master.
 
 int _entier(dynamic v) => v is num ? v.toInt() : -1;
 
@@ -52,6 +53,12 @@ class EtatPC {
   final bool ecranNoir; // écran du PC en mode « écran noir »
   final int lumEsp; // luminosité de l'écran de l'ESP32 (5 à 100), -1 = inconnue
   final int ecrans; // nombre d'écrans allumés sur le PC
+  final String video; // source de la vidéo au premier plan (YouTube, Netflix…), '' si aucune
+  final String videoTitre;
+  final int inactif; // minutes sans clavier ni souris (0 = PC utilisé, ou jeu / vidéo / verrou)
+  final int jeuTotal; // minutes passées en tout sur le jeu en cours, -1 = inconnu
+  final int masterV; // change quand les données du master changent sur le PC
+  final bool masterActif; // appli de recherche au premier plan depuis 2 min
 
   const EtatPC({
     required this.recu,
@@ -76,6 +83,12 @@ class EtatPC {
     this.ecranNoir = false,
     this.lumEsp = -1,
     this.ecrans = 1,
+    this.video = '',
+    this.videoTitre = '',
+    this.inactif = 0,
+    this.jeuTotal = -1,
+    this.masterV = 0,
+    this.masterActif = false,
   });
 
   factory EtatPC.vide() => const EtatPC(
@@ -130,10 +143,18 @@ class EtatPC {
       ecranNoir: m['ecran_noir'] == true,
       lumEsp: _entier(m['lum_esp']),
       ecrans: m['ecrans'] is num ? (m['ecrans'] as num).toInt() : 1,
+      video: (m['video'] ?? '').toString(),
+      videoTitre: (m['video_titre'] ?? '').toString(),
+      inactif: m['inactif'] is num ? (m['inactif'] as num).toInt() : 0,
+      jeuTotal: _entier(m['jeu_total']),
+      masterV: m['master_v'] is num ? (m['master_v'] as num).toInt() : 0,
+      masterActif: m['master_actif'] == true,
     );
   }
 
   bool get enJeu => jeu.isNotEmpty;
 
   bool get arretPrevu => arret > 0;
+
+  bool get enVideo => video.isNotEmpty;
 }

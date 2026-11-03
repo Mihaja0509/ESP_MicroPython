@@ -3,6 +3,10 @@
 # Phase 10 : scène « cinéma » (vidéo), scène « calme » (PC allumé mais inutilisé),
 # météo 2 min toutes les 10 min dans la scène normale, mode jeu enrichi (courbe des FPS,
 # chrono de session, temps total du jeu, alerte de chauffe).
+# Phase 11 : scène « master » (labo AR de nuit, mascotte en veste de labo + lunettes AR) :
+# échéance en J-x, objectif du jour, lecture, rédaction, dernier résultat de mesure ou réunion.
+# Elle s'affiche : briefing du matin (60 s), 20 s toutes les 5 min pendant le travail de recherche,
+# 1 suggestion sur 3 de la scène calme (15 s), et 15 s après un événement (MASTER_INFO).
 import math
 import random
 import time
@@ -23,6 +27,11 @@ CARTE_NUIT = (10, 12, 30)
 CARTE_JEU = (8, 6, 22)
 CARTE_CINE = (16, 6, 12)
 CARTE_CALME = (14, 20, 42)
+CARTE_LABO = (20, 28, 48)
+VIOLET = (150, 110, 255)
+CYAN_AR = (0, 200, 230)
+TEXTE_AR = (230, 236, 245)
+GRIS_AR = (140, 150, 170)
 BLANC = (255, 255, 255)
 GRIS = (150, 150, 190)
 DOUX = (200, 200, 235)
@@ -50,6 +59,21 @@ PAUSE_JEU_MS = 2 * 3600 * 1000   # rappel « petite pause ? » toutes les 2 h de
 CHAUFFE_GPU = 83           # °C
 CHAUFFE_CPU = 92           # °C
 CHAUFFE_RAPPEL_MS = 5 * 60 * 1000
+BRIEFING_MS = 60000        # scène master au premier usage du jour (après 6 h)
+TRAVAIL_CYCLE_MS = 300000  # pendant le travail de recherche : 20 s toutes les 5 min
+TRAVAIL_MONTRE_MS = 20000
+INFO_MS = 15000            # après un événement (nouveau résultat, réunion dans 1 h…)
+FICHIER_BRIEFING = "briefing.txt"
+RAPPELS_MASTER = (
+    ("livre", "Une section à la fois."), ("stylo", "Le fond, puis le style."),
+    ("stylo", "Cite pendant que tu écris."), ("livre", "Source notée ?"),
+    ("livre", "1 article lu > 3 ouverts."), ("lunettes", "Relis ta question."),
+    ("calendrier", "Question au superviseur ?"), ("graphe", "Mesure 3 fois, conclus 1."),
+    ("graphe", "Hz, mode, temp. : notés ?"), ("livre", "Ta matrice est à jour ?"),
+    ("livre", "Quartile de la revue vu ?"), ("stylo", "Structure, puis affine."),
+    ("chrono", "Commit, puis pause."), ("chrono", "Cinq minutes de pause ?"),
+    ("stylo", "One section at a time."), ("stylo", "Write first, polish later."),
+)
 COULEURS_SOURCES = {"YouTube": (255, 70, 70), "Netflix": (229, 30, 40), "VLC": (255, 150, 30),
                     "Anime-Sama": (90, 170, 255), "Crunchyroll": (255, 130, 40),
                     "Twitch": (170, 110, 255), "Prime Video": (40, 170, 255),
@@ -96,15 +120,18 @@ class Interface:
         self.f_xs = Police(DOSSIER + "police_xs.fnt")
         taille_fond = W * H * 2
         self.fonds = {n: _charger_brut("fond_%s.bin" % n, taille_fond)
-                      for n in ("jour", "nuit", "jeu", "cine", "calme")}
+                      for n in ("jour", "nuit", "jeu", "cine", "calme", "labo")}
         self.persos = {}
         for casque in ("cou", "oreilles"):
             for nom in ("neutre", "cligne", "content", "surpris"):
                 self.persos[(casque, nom)] = _charger("perso_%s_%s.bin" % (casque, nom), PERSO_W, PERSO_H)
+        for nom in ("neutre", "cligne", "content", "surpris"):  # tenue labo AR (scène master)
+            self.persos[("ar", nom)] = _charger("perso_ar_%s.bin" % nom, PERSO_W, PERSO_H)
         self.icones = {}
         for nom in ("son", "muet", "soleil", "cadenas", "clavier", "souris", "appli", "lune",
                     "power", "musique", "manette", "coucou",
-                    "popcorn", "eau", "fenetre", "livre", "lit", "thermo", "chrono", "etirer"):
+                    "popcorn", "eau", "fenetre", "livre", "lit", "thermo", "chrono", "etirer",
+                    "stylo", "graphe", "lunettes", "calendrier"):
             self.icones[nom] = _charger("ico_%s.bin" % nom, 18, 18)
         self.ico_eclair = _charger("ico_eclair.bin", 12, 12)
         self.ico_casque = _charger("ico_casque.bin", 12, 12)
@@ -137,6 +164,19 @@ class Interface:
         self.dernier_jeu = ""    # pour proposer « Reprendre … ? » dans la scène calme
         self.chaud = False
         self.bulle_calme = None  # icône de la suggestion affichée (scène calme)
+        # Phase 11 : scène master
+        self.base = None          # scène « de fond » (normale, calme…) sans la scène master
+        self.base_depuis = time.ticks_ms()
+        self.master_fin = None    # ticks de fin d'un affichage forcé (briefing, événement)
+        self.travail_depuis = None
+        self.rappel = 0           # prochain rappel de la liste RAPPELS_MASTER
+        self.surpris_jusqua = None
+        self.tard_jour = -1       # jour où « on reprend demain ? » a déjà été dit
+        try:
+            with open(FICHIER_BRIEFING) as f:
+                self.briefing_jour = f.read().strip()
+        except OSError:
+            self.briefing_jour = ""
 
     # ------------------------------------------------------------------ outils
     def _couleur(self, rgb):
@@ -207,7 +247,7 @@ class Interface:
     # ------------------------------------------------------------------ dessin
     def dessiner(self, etat, maintenant):
         self.lum = etat.get("lum", 85)
-        mode = self._choisir_mode(etat)
+        mode = self._choisir_mode(etat, maintenant)
         if mode != self.mode:
             self._changer_mode(self.mode, mode, etat, maintenant)
         if mode == "eteint":
@@ -227,6 +267,8 @@ class Interface:
             fond, carte = "cine", CARTE_CINE
         elif mode == "calme":
             fond, carte = "calme", CARTE_CALME
+        elif mode == "master":
+            fond, carte = "labo", CARTE_LABO
         else:
             fond, carte = "jour", CARTE_JOUR
         self.ecran.tampon[:] = self.fonds[fond]
@@ -241,13 +283,67 @@ class Interface:
             self._scene_video(etat, carte, maintenant)
         elif mode == "calme":
             self._scene_calme(etat, carte, maintenant)
+        elif mode == "master":
+            self._scene_master(etat, carte, maintenant)
         else:
             self._scene_nuit(etat, carte, mode)
         self._mascotte(etat, mode, t, maintenant)
         self._bandeau(maintenant)
         self.ecran.afficher()
 
-    def _choisir_mode(self, etat):
+    def _choisir_mode(self, etat, maintenant):
+        base = self._choisir_base(etat)
+        if base != self.base:
+            self.base = base
+            self.base_depuis = maintenant
+        if base in ("normal", "calme") and self._master_visible(etat, base, maintenant):
+            return "master"
+        if base != "normal" or not (etat.get("master") or {}).get("a"):
+            self.travail_depuis = None
+        return base
+
+    def _master_visible(self, etat, base, maintenant):
+        """Vrai si la scène master doit remplacer la scène normale ou calme maintenant."""
+        m = etat.get("master")
+        if not m:
+            return False
+        if self.master_fin is not None:
+            if time.ticks_diff(self.master_fin, maintenant) > 0:
+                return True
+            self.master_fin = None
+        lt = time.localtime()
+        if base == "normal" and lt[0] >= 2025 and lt[3] >= 6:
+            jour = "%04d-%02d-%02d" % lt[:3]
+            if jour != self.briefing_jour:  # briefing : premier usage du jour
+                self.briefing_jour = jour
+                try:
+                    with open(FICHIER_BRIEFING, "w") as f:
+                        f.write(jour)
+                except OSError:
+                    pass
+                self.master_fin = time.ticks_add(maintenant, BRIEFING_MS)
+                return True
+        if base == "normal" and m.get("a"):
+            if self.travail_depuis is None:
+                self.travail_depuis = maintenant
+            return time.ticks_diff(maintenant, self.travail_depuis) % TRAVAIL_CYCLE_MS < TRAVAIL_MONTRE_MS
+        if base == "calme":
+            age = time.ticks_diff(maintenant, self.base_depuis)
+            return (age // SUGGESTION_MS) % 3 == 2 and age % SUGGESTION_MS < INFO_MS
+        return False
+
+    def info_master(self, icone, texte):
+        """Événement du master (MASTER_INFO) : bandeau 3 s puis scène master 15 s
+        (jamais par-dessus un jeu, une vidéo, ni quand le PC dort)."""
+        if self.base not in ("normal", "calme"):
+            return
+        maintenant = time.ticks_ms()
+        self.reagir(icone, texte, duree=3000)
+        self.master_fin = time.ticks_add(maintenant, INFO_MS)
+        if icone == "graphe":
+            self.surpris_jusqua = time.ticks_add(maintenant, 1500)
+
+    def _choisir_base(self, etat):
         if etat.get("eteint"):
             return "eteint"
         if etat.get("arret_fin") is not None:
@@ -305,7 +401,12 @@ class Interface:
         elif nouveau == "video":
             self.reagir("popcorn", "Bon visionnage !")
         elif nouveau == "calme":
-            self.bulle = None  # la scène calme arrive sans bruit
+            if ancien != "master":
+                self.bulle = None  # la scène calme arrive sans bruit
+        elif nouveau == "master":
+            self._rappel_master()
+        elif ancien == "master" or (ancien == "calme" and nouveau == "master"):
+            pass
         elif ancien == "calme" and duree_ancien > 10 * 60000:
             self.reagir("coucou", "Te revoilà !", bandeau=False)
 
@@ -319,11 +420,13 @@ class Interface:
             couleurs = (rgb565(255, 220, 160), rgb565(170, 120, 90))  # poussière dans le faisceau
         elif mode == "calme":
             couleurs = (rgb565(255, 240, 150), rgb565(150, 170, 255))  # lucioles
+        elif mode == "master":
+            couleurs = (rgb565(0, 200, 230), rgb565(0, 110, 140))  # points « hologramme »
         else:
             couleurs = (rgb565(170, 190, 255), rgb565(120, 140, 220))
-        lent = 0.35 if mode in ("video", "calme") else 1.0
+        lent = 0.35 if mode in ("video", "calme", "master") else 1.0
         for i, p in enumerate(self.particules):
-            if mode in ("video", "calme") and i % 2:
+            if mode in ("video", "calme", "master") and i % 2:
                 continue  # moitié moins de particules : ambiance tranquille
             p[1] -= p[2] * lent
             if p[1] < 0:
@@ -588,7 +691,7 @@ class Interface:
         fb = self.fb
         self._heure_date(carte)
         liste = self._suggestions(etat)
-        icone, texte = liste[(self._age(self.mode_depuis, maintenant) // SUGGESTION_MS) % len(liste)]
+        icone, texte = liste[(self._age(self.base_depuis, maintenant) // SUGGESTION_MS) % len(liste)]
         self.bulle_calme = icone
         # la suggestion, dans un petit encadré
         fb.rect(14, 82, 166, 56, rgb565(60, 70, 120))
@@ -630,6 +733,8 @@ class Interface:
     def _mascotte(self, etat, mode, t, maintenant):
         fb = self.fb
         casque = "oreilles" if (etat["evt"]["casque"] or mode == "jeu") else "cou"
+        if mode == "master":
+            casque = "ar"  # veste de labo + lunettes AR
         dort = mode in ("absent", "verrou")
         calme = mode == "calme"
         age_reaction = self._age(self.reaction, maintenant)
@@ -641,8 +746,15 @@ class Interface:
         clin = time.ticks_diff(maintenant, self.prochain_clin) > (-400 if calme else -160)
         # au cinéma, la mascotte rit de temps en temps (≈ 2 s toutes les 25 s)
         rit = mode == "video" and (maintenant // 1000) % 25 < 2
-        if dort:
+        m = etat.get("master") or {}
+        tard = mode == "master" and self._tard()
+        if dort or tard:
             visage = "cligne"
+        elif mode == "master" and self.surpris_jusqua is not None and \
+                time.ticks_diff(self.surpris_jusqua, maintenant) > 0:
+            visage = "surpris"
+        elif mode == "master" and m.get("o") and m["o"][1]:
+            visage = "neutre" if clin and age_reaction >= DUREE_REACTION else "content"
         elif age_reaction < DUREE_REACTION or rit:
             visage = "content"
         elif clin:
@@ -673,7 +785,7 @@ class Interface:
         bulle = self.bulle if age_reaction < DUREE_REACTION else None
         if mode == "arret":
             bulle = "coucou"  # la mascotte fait coucou pendant tout le compte à rebours
-        if calme and bulle is None and self._age(self.mode_depuis, maintenant) % BULLE_CALME_MS < 3000:
+        if calme and bulle is None and self._age(self.base_depuis, maintenant) % BULLE_CALME_MS < 3000:
             bulle = self.bulle_calme  # rappelle doucement la suggestion
         if bulle and not dort and not pensee:
             cx, cy = PERSO_X - 2, PERSO_Y + 24
@@ -708,3 +820,112 @@ class Interface:
         if ico:
             fb.blit(ico, x + 8, y + 4, CLE)
         self.f_m.ecrire(fb, self.f_m.couper(texte, largeur - 44), x + 32, y + 4, ENCRE, BLANC)
+
+    # ------------------------------------------------------------------ scène master (Phase 11)
+    def _tard(self):
+        lt = time.localtime()
+        return lt[0] >= 2025 and (lt[3] >= 23 or lt[3] < 5)
+
+    def _rappel_master(self):
+        if self.bandeau is not None:
+            return  # un événement a déjà son bandeau
+        lt = time.localtime()
+        if self._tard():
+            if self.tard_jour != lt[2]:
+                self.tard_jour = lt[2]
+                self.reagir("lit", "Tard : à demain ?", duree=3000)
+            return
+        icone, texte = RAPPELS_MASTER[self.rappel % len(RAPPELS_MASTER)]
+        self.rappel += 1
+        self.reagir(icone, texte, duree=3000)
+
+    def _barre_master(self, y, nom, texte, valeur, but, couleur, carte):
+        fb = self.fb
+        self.f_xs.ecrire(fb, nom, 16, y, GRIS_AR, carte)
+        self.f_xs.ecrire(fb, texte, 180 - self.f_xs.largeur(texte), y, TEXTE_AR, carte)
+        fb.fill_rect(16, y + 14, 162, 4, rgb565(40, 50, 78))
+        if but > 0 and valeur > 0:
+            fb.fill_rect(16, y + 14, 162 * min(valeur, but) // but, 4, rgb565(*couleur))
+
+    def _scene_master(self, etat, carte, maintenant):
+        fb = self.fb
+        m = etat.get("master") or {}
+        # 1. prochaine échéance : J-x en grand + titre
+        e = m.get("e")
+        if e:
+            jours, titre = e[0], e[1]
+            couleur = ROUGE if jours <= 3 else (ORANGE if jours <= 7 else CYAN_AR)
+            if jours == 0:
+                x = self.f_m.ecrire(fb, "Aujourd'hui", 14, 16, couleur, carte) + 8
+            else:
+                x = self.f_m.ecrire(fb, "J-", 14, 24, couleur, carte)
+                x = self.f_heure.ecrire(fb, "%d" % jours, x + 1, 2, couleur, carte) + 8
+            lignes = self._lignes(self.f_s, titre, 180 - x, 2)
+            y = 26 - len(lignes) * 8
+            for l in lignes:
+                self.f_s.ecrire(fb, l, x, y, TEXTE_AR, carte)
+                y += 16
+        else:
+            self.f_m.ecrire(fb, "Aucune échéance", 14, 12, GRIS_AR, carte)
+            self.f_xs.ecrire(fb, "Ajoute-la dans l'app Dadou", 14, 32, GRIS_AR, carte)
+        # 2. objectif du jour
+        o = m.get("o")
+        if o:
+            fait = o[1]
+            fb.rect(14, 53, 11, 11, rgb565(*(VERT if fait else CYAN_AR)))
+            if fait:  # petite coche
+                fb.line(16, 58, 19, 61, rgb565(*VERT))
+                fb.line(19, 61, 24, 54, rgb565(*VERT))
+            self.f_m.ecrire(fb, self.f_m.couper(o[0], 150), 30, 49, VERT if fait else TEXTE_AR, carte)
+        else:
+            self.f_s.ecrire(fb, "Objectif du jour : dans l'app", 14, 51, GRIS_AR, carte)
+        fb.fill_rect(14, 69, 166, 1, rgb565(40, 50, 78))
+        # 3. lecture et rédaction
+        l = m.get("l")
+        if l:
+            texte = "%d/%d" % (l[0], l[1]) if l[1] else "%d lus" % l[0]
+            self._barre_master(73, "Lecture", texte, l[0], l[1], VIOLET, carte)
+        else:
+            self.f_xs.ecrire(fb, "Lecture : choisis les dossiers", 16, 76, GRIS_AR, carte)
+        r = m.get("r")
+        if r:
+            texte = "%d/%d mots" % (r[0], r[1]) if r[1] else "%d mots" % r[0]
+            self._barre_master(93, "Rédaction", texte, r[0], r[1], VERT, carte)
+        else:
+            self.f_xs.ecrire(fb, "Rédaction : choisis le mémoire", 16, 96, GRIS_AR, carte)
+        fb.fill_rect(14, 115, 166, 1, rgb565(40, 50, 78))
+        # 4. dernier résultat de mesure, sinon prochaine réunion, sinon temps du jour
+        x = m.get("x")
+        reu = m.get("m")
+        t = m.get("t", 0)
+        if x:
+            self.f_s.ecrire(fb, "Lat. %d ms  •  p95 %d" % (x[0], x[1]), 14, 119, TEXTE_AR, carte)
+            self._courbe_master(m.get("c") or [], 16, 137, 84, 12)
+            details = ("%s %s Hz" % (x[3], x[4])).strip() if (x[3] or x[4]) else ""
+            self.f_xs.ecrire(fb, self.f_xs.couper(details, 74), 106, 135, GRIS_AR, carte)
+            self.f_xs.ecrire(fb, "%d essai%s" % (x[2], "s" if x[2] > 1 else ""), 106, 148, GRIS_AR, carte)
+        elif reu:
+            self.f_s.ecrire(fb, "Réunion : %s" % reu[0], 14, 119, CYAN_AR, carte)
+            for i, ligne in enumerate(self._lignes(self.f_xs, reu[1], 166, 2)):
+                self.f_xs.ecrire(fb, ligne, 14, 136 + i * 12, TEXTE_AR, carte)
+        else:
+            self.f_s.ecrire(fb, "Master : %s aujourd'hui" % (duree_texte(t) if t else "0 min"),
+                            14, 119, CYAN_AR, carte)
+            self.f_xs.ecrire(fb, "Phase : %s" % m.get("p", ""), 14, 140, GRIS_AR, carte)
+
+    def _courbe_master(self, serie, x0, y0, w, h):
+        """Médianes de latence des 10 dernières sessions (plus bas = mieux)."""
+        fb = self.fb
+        fb.fill_rect(x0, y0 + h, w, 1, rgb565(40, 50, 78))
+        if len(serie) < 2:
+            return
+        haut, bas = max(serie), min(serie)
+        ecart = max(1, haut - bas)
+        pas = w / (len(serie) - 1)
+        avant = None
+        for i, v in enumerate(serie):
+            pt = (int(x0 + i * pas), y0 + int((v - bas) * h / ecart))
+            if avant:
+                fb.line(avant[0], avant[1], pt[0], pt[1], rgb565(*CYAN_AR))
+            avant = pt
+        fb.fill_rect(avant[0] - 1, avant[1] - 1, 3, 3, rgb565(*VERT))

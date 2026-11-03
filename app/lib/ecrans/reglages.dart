@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../connexion.dart';
 import '../theme.dart';
+import '../notifications.dart';
 import '../widget_android.dart';
 
 class EcranReglages extends StatefulWidget {
@@ -138,6 +139,8 @@ class _EcranReglagesState extends State<EcranReglages> {
         ),
         const SizedBox(height: 14),
         CarteWidgetAndroid(cx: cx),
+        const SizedBox(height: 14),
+        const CarteNotifications(),
         const SizedBox(height: 14),
         const Carte(
           child: Column(

@@ -6,6 +6,8 @@
 #   quand le PC est éteint (et au démarrage de la carte tant que le PC ne parle pas),
 #   luminosité réglable depuis l'app (LUM_ESP n).
 # - Phase 10 : EVT VIDEO (scène cinéma), EVT INACTIF (scène calme), JEU_TOTAL (mode jeu).
+# - Phase 11 : MASTER {json} (scène master), MASTER_INFO ["icone", "texte"] (événement).
+import json
 import select
 import sys
 import time
@@ -36,7 +38,8 @@ etat = {"connecte": False, "stat": stat, "gpu": gpu, "perf": perf, "evt": evt, "
         "eteint": True,        # écran noir : PC éteint (ou carte qui vient de démarrer sans PC)
         "arret_fin": None,     # ticks de la fin du compte à rebours d'arrêt (None = pas d'arrêt)
         "arret_total": 60000,  # durée du compte à rebours (ms), pour la barre
-        "lum": 85}             # luminosité choisie dans l'app (5 à 100)
+        "lum": 85,             # luminosité choisie dans l'app (5 à 100)
+        "master": None}        # Phase 11 : données du master (ligne MASTER du PC)
 
 ATTENTE_ABSENT = 12000     # sans données depuis 12 s = PC éteint / en veille / agent arrêté
 RETOUR_PC = 5000           # il faut 5 s de données sans coupure pour dire « le PC est revenu »
@@ -99,7 +102,7 @@ def lire_ligne():
                 return ligne
         elif " " <= c <= "~" or ord(c) > 159:
             tampon += c
-            if len(tampon) > 300:
+            if len(tampon) > 900:
                 tampon = ""
     return None
 
@@ -183,7 +186,7 @@ def executer(ligne):
         etat["meteo"] = liste
         return "OK"
     # --- données du programme PC -------------------------------------------
-    if cmd in ("STAT", "GPU", "PERF", "EVT", "TEMPS", "METEO_J", "JEU_TOTAL"):
+    if cmd in ("STAT", "GPU", "PERF", "EVT", "TEMPS", "METEO_J", "JEU_TOTAL", "MASTER", "MASTER_INFO"):
         maintenant = time.ticks_ms()
         if not etat["connecte"]:
             if debut_flux is None or time.ticks_diff(maintenant, derniere_donnee) > 3000:
@@ -209,6 +212,22 @@ def executer(ligne):
             perf["cpu_temp"], perf["fps"] = [int(x) for x in arg.split()][:2]
         except ValueError:
             return "ERR utilise : PERF temp_cpu fps"
+        return "OK"
+    if cmd == "MASTER":
+        try:
+            m = json.loads(arg)
+        except ValueError:
+            return "ERR MASTER : JSON invalide"
+        if not isinstance(m, dict):
+            return "ERR MASTER : objet attendu"
+        etat["master"] = m
+        return "OK"
+    if cmd == "MASTER_INFO":
+        try:
+            icone, texte = json.loads(arg)[:2]
+        except (ValueError, TypeError):
+            return "ERR utilise : MASTER_INFO [\"icone\", \"texte\"]"
+        ui.info_master(str(icone), str(texte))
         return "OK"
     if cmd == "JEU_TOTAL":
         try:

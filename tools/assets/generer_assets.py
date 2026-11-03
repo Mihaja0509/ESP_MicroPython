@@ -659,6 +659,178 @@ def assets_phase10():
 
 
 # ---------------------------------------------------------------------------
+# Phase 11 : tenue « labo AR » (scène master) — veste claire + lunettes AR
+# ---------------------------------------------------------------------------
+VESTE = (226, 232, 242, 255)
+VESTE_OMBRE = (176, 188, 210, 255)
+MONTURE = (28, 32, 46, 255)
+
+
+def corps_labo(remonter=30):
+    """Buste en veste de labo claire, col et fermeture éclair cyan, badge sur la poitrine."""
+    L = Image.new("RGBA", (1024, 1024), (0, 0, 0, 0))
+    d = ImageDraw.Draw(L)
+    bas_cou = 660 - remonter
+    d.rectangle((474, 540, 548, bas_cou), fill=PEAU)
+    d.line([(474, 540), (474, bas_cou)], fill=CONTOUR, width=7)
+    d.line([(548, 540), (548, bas_cou)], fill=CONTOUR, width=7)
+    d.rectangle((477, 572, 545, 584), fill=PEAU_OMBRE)
+    avant = Image.new("RGBA", (1024, 1024), (0, 0, 0, 0))
+    d = ImageDraw.Draw(avant)
+    # t-shirt sombre dans l'encolure
+    d.polygon([(430, 624), (512, 700), (594, 624)], fill=(24, 30, 52, 255))
+    # les deux pans de la veste (encolure en V)
+    gauche = [(300, 690), (352, 640), (430, 616), (512, 720), (512, 870), (272, 870)]
+    droite = [(724, 690), (672, 640), (594, 616), (512, 720), (512, 870), (752, 870)]
+    for pan in (gauche, droite):
+        d.polygon(pan, fill=VESTE, outline=CONTOUR, width=9)
+    # revers du col, bordés de cyan
+    d.polygon([(430, 616), (468, 640), (500, 712), (512, 720)], fill=VESTE_OMBRE)
+    d.polygon([(594, 616), (556, 640), (524, 712), (512, 720)], fill=VESTE_OMBRE)
+    d.line([(430, 616), (512, 720), (594, 616)], fill=ACCENT, width=8)
+    d.line([(512, 720), (512, 870)], fill=CONTOUR, width=7)
+    # plis des manches
+    d.line([(352, 700), (336, 860)], fill=VESTE_OMBRE, width=10)
+    d.line([(672, 700), (688, 860)], fill=VESTE_OMBRE, width=10)
+    # badge « AR » sur la poitrine (rectangle cyan + petit trait)
+    d.rounded_rectangle((560, 742, 640, 790), 8, fill=ACCENT, outline=CONTOUR, width=5)
+    d.rectangle((574, 756, 626, 764), fill=(255, 255, 255, 255))
+    d.rectangle((574, 770, 608, 776), fill=(255, 255, 255, 255))
+    L.alpha_composite(avant, (0, -remonter))
+    return L
+
+
+def lunettes_ar(img):
+    """Lunettes AR (style XREAL) : monture sombre, verres teintés transparents, reflet cyan."""
+    verres = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    d = ImageDraw.Draw(verres)
+    boites = ((372, 372, 492, 456), (528, 372, 648, 456))
+    for b in boites:
+        d.rounded_rectangle(b, 26, fill=(20, 60, 110, 95))
+    img.alpha_composite(verres)
+    d = ImageDraw.Draw(img)
+    for b in boites:
+        d.rounded_rectangle(b, 26, outline=MONTURE, width=12)
+        # reflet holographique en haut du verre
+        d.line([(b[0] + 26, b[1] + 16), (b[2] - 40, b[1] + 16)], fill=(120, 235, 255, 255), width=6)
+    d.line([(492, 400), (528, 400)], fill=MONTURE, width=12)       # pont
+    d.line([(372, 398), (316, 386)], fill=MONTURE, width=12)       # branches
+    d.line([(648, 398), (704, 386)], fill=MONTURE, width=12)
+    d.rectangle((596, 362, 640, 372), fill=ACCENT)                 # petite diode cyan
+
+
+def perso_ar(yeux="ouverts", bouche="normale", taille=(PERSO_W, PERSO_H)):
+    base = Image.new("RGBA", (1024, 1024), (0, 0, 0, 0))
+    base.alpha_composite(corps_labo())
+    base.alpha_composite(tete(yeux, bouche))
+    lunettes_ar(base)
+    A = np.array(base)
+    yy, xx = np.mgrid[0:1024, 0:1024]
+    garder = (((xx - 512) / 250.0) ** 2 + ((yy - 560) / 250.0) ** 2 <= 1) | (yy < 640)
+    A[~garder] = 0
+    opaque = A[:, :, 3] > 40
+    bord = ndimage.binary_dilation(opaque, iterations=12)
+    out = np.zeros_like(A)
+    out[bord] = (255, 255, 255, 255)
+    o = Image.fromarray(out)
+    o.alpha_composite(Image.fromarray(A))
+    o = o.crop((262, 44, 762, 834))
+    return o.resize(taille, Image.LANCZOS)
+
+CARTE_LABO = (20, 28, 48)
+
+
+def fond_labo():
+    """Labo AR de nuit : bleu nuit en aplats, grille en perspective discrète, lunettes AR en filigrane."""
+    im = Image.new("RGBA", (W, H), (11, 16, 32, 255))
+    d = ImageDraw.Draw(im, "RGBA")
+    # léger halo derrière la mascotte (aplats concentriques, pas de dégradé fin)
+    for r, c in ((78, (14, 22, 44)), (60, (16, 27, 52)), (42, (18, 31, 58))):
+        d.ellipse((PERSO_X + PERSO_W // 2 - r, 92 - r, PERSO_X + PERSO_W // 2 + r, 92 + r), fill=c + (255,))
+    # grille en perspective en bas à droite
+    horizon = 128
+    for i in range(-10, 11):
+        x0 = 256 + i * 9
+        x1 = 256 + i * 46
+        d.line((x0, horizon, x1, H), fill=(0, 60, 75, 255), width=1)
+    y, pas = horizon, 4
+    while y < H:
+        d.line((190, y, W, y), fill=(0, 60, 75, 255), width=1)
+        y += pas
+        pas += 3
+    # contour de lunettes AR en filigrane, derrière la tête de la mascotte
+    cx, cy = PERSO_X + PERSO_W // 2, 46
+    for dx in (-26, 26):
+        d.rounded_rectangle((cx + dx - 22, cy - 13, cx + dx + 22, cy + 13), 9, outline=(0, 90, 115, 255), width=2)
+    d.line((cx - 4, cy - 4, cx + 4, cy - 4), fill=(0, 90, 115, 255), width=2)
+    d.line((cx - 48, cy - 6, cx - 60, cy - 10), fill=(0, 90, 115, 255), width=2)
+    d.line((cx + 48, cy - 6, cx + 60, cy - 10), fill=(0, 90, 115, 255), width=2)
+    # petits points « hologramme »
+    random.seed(21)
+    for _ in range(26):
+        x, y = random.randint(196, W - 4), random.randint(4, 124)
+        c = random.choice(((0, 200, 230), (0, 120, 150), (90, 160, 200)))
+        d.rectangle((x, y, x + (1 if random.random() < .7 else 2), y + 1), fill=c + (255,))
+    # carte de gauche
+    d.rounded_rectangle((6, 6, 186, 166), 10, fill=CARTE_LABO + (255,), outline=(0, 200, 230, 90), width=1)
+    return im
+
+
+def i_stylo(d, T):
+    d.polygon([(T * .70, T * .10), (T * .90, T * .30), (T * .38, T * .82), (T * .18, T * .62)], fill=(0, 170, 220, 255))
+    d.polygon([(T * .18, T * .62), (T * .38, T * .82), (T * .10, T * .92)], fill=(240, 200, 140, 255))
+    d.polygon([(T * .10, T * .92), (T * .16, T * .84), (T * .19, T * .87)], fill=ENCRE)
+    d.line((T * .62, T * .18, T * .82, T * .38), fill=ENCRE, width=int(T * .06))
+
+
+def i_graphe(d, T):
+    d.line((T * .12, T * .10, T * .12, T * .88, T * .92, T * .88), fill=ENCRE, width=int(T * .07))
+    pts = [(T * .18, T * .70), (T * .38, T * .48), (T * .56, T * .58), (T * .84, T * .22)]
+    d.line(pts, fill=(80, 200, 140, 255), width=int(T * .09), joint="curve")
+    for x, y in pts:
+        d.ellipse((x - T * .06, y - T * .06, x + T * .06, y + T * .06), fill=(80, 200, 140, 255))
+
+
+def i_lunettes(d, T):
+    for x0 in (.06, .54):
+        d.rounded_rectangle((T * x0, T * .34, T * (x0 + .40), T * .68), int(T * .1),
+                            fill=(60, 140, 200, 255), outline=ENCRE, width=int(T * .07))
+        d.line((T * (x0 + .07), T * .44, T * (x0 + .22), T * .44), fill=(200, 245, 255, 255), width=int(T * .05))
+    d.line((T * .46, T * .44, T * .54, T * .44), fill=ENCRE, width=int(T * .07))
+
+
+def i_calendrier(d, T):
+    d.rounded_rectangle((T * .10, T * .18, T * .90, T * .90), int(T * .1), fill=(255, 255, 255, 255), outline=ENCRE, width=int(T * .07))
+    d.rectangle((T * .10, T * .18, T * .90, T * .38), fill=(255, 90, 90, 255))
+    for x in (.30, .70):
+        d.line((T * x, T * .08, T * x, T * .28), fill=ENCRE, width=int(T * .08))
+    for k in range(6):
+        x = .24 + (k % 3) * .2
+        y = .52 + (k // 3) * .18
+        d.rectangle((T * x, T * y, T * (x + .1), T * (y + .1)), fill=ENCRE)
+
+
+def assets_phase11():
+    """Écrit seulement les fichiers ajoutés en Phase 11."""
+    SORTIE.mkdir(parents=True, exist_ok=True)
+    APERCUS.mkdir(parents=True, exist_ok=True)
+    im = fond_labo()
+    ecrire("fond_labo.bin", rgb565(im))
+    im.convert("RGB").save(APERCUS / "fond_labo.png")
+    images = {"neutre": dict(), "cligne": dict(yeux="fermes"),
+              "content": dict(yeux="contents", bouche="rire"), "surpris": dict(bouche="o")}
+    planche = Image.new("RGB", (PERSO_W * 4 + 40, PERSO_H + 10), (11, 16, 32))
+    for i, (nom, opts) in enumerate(images.items()):
+        im = perso_ar(**opts)
+        ecrire(f"perso_ar_{nom}.bin", rgb565(sprite_transparent(im, (18, 31, 58))))
+        planche.paste(im, (5 + i * (PERSO_W + 10), 5), im)
+    planche.save(APERCUS / "mascotte_ar.png")
+    for nom, f in (("stylo", i_stylo), ("graphe", i_graphe), ("lunettes", i_lunettes),
+                   ("calendrier", i_calendrier)):
+        ecrire(f"ico_{nom}.bin", rgb565(icone(f)))
+
+
+# ---------------------------------------------------------------------------
 # Polices : fichier .fnt, 4 niveaux par pixel (0 = vide … 3 = plein), 1 octet par pixel
 # ---------------------------------------------------------------------------
 CARACTERES = "".join(chr(c) for c in range(32, 127)) + "°éèêëàâäçîïôöùûüÉÈÀÇ…•"
@@ -737,6 +909,8 @@ def main():
 
     print("Phase 10 :")
     assets_phase10()
+    print("Phase 11 :")
+    assets_phase11()
 
     print("Polices :")
     police("Inter-Black.otf", 54, "police_fps.fnt", "0123456789-")
