@@ -14,4 +14,6 @@ tools/agent/reglages.json
 tools/agent/appareils.json
 tools/agent/raccourcis.json
 tools/agent/preferences.json
+tools/agent/jeux.json
+tools/agent/stats_jeux.json
 tools/agent/*.tmp

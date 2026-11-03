@@ -5,6 +5,7 @@
 # - Phase 7 : compte à rebours quand le PC s'éteint (EVT ARRET n), écran complètement noir
 #   quand le PC est éteint (et au démarrage de la carte tant que le PC ne parle pas),
 #   luminosité réglable depuis l'app (LUM_ESP n).
+# - Phase 10 : EVT VIDEO (scène cinéma), EVT INACTIF (scène calme), JEU_TOTAL (mode jeu).
 import select
 import sys
 import time
@@ -28,8 +29,9 @@ pc = PC()
 # Valeurs envoyées par le programme PC (agent_pc.py) ; -1 = inconnu
 stat = {"cpu": -1, "ram": -1, "vol": -1, "bat": -1, "chg": 0}
 gpu = {"temp": -1, "charge": -1, "vram": -1}
-perf = {"cpu_temp": -1, "fps": -1}
-evt = {"casque": "", "manette": 0, "verrou": 0, "jeu": ""}
+perf = {"cpu_temp": -1, "fps": -1, "total": -1}   # total : minutes passées sur le jeu en cours
+evt = {"casque": "", "manette": 0, "verrou": 0, "jeu": "", "video": "", "video_titre": "",
+       "inactif": 0}
 etat = {"connecte": False, "stat": stat, "gpu": gpu, "perf": perf, "evt": evt, "meteo": [],
         "eteint": True,        # écran noir : PC éteint (ou carte qui vient de démarrer sans PC)
         "arret_fin": None,     # ticks de la fin du compte à rebours d'arrêt (None = pas d'arrêt)
@@ -181,7 +183,7 @@ def executer(ligne):
         etat["meteo"] = liste
         return "OK"
     # --- données du programme PC -------------------------------------------
-    if cmd in ("STAT", "GPU", "PERF", "EVT", "TEMPS", "METEO_J"):
+    if cmd in ("STAT", "GPU", "PERF", "EVT", "TEMPS", "METEO_J", "JEU_TOTAL"):
         maintenant = time.ticks_ms()
         if not etat["connecte"]:
             if debut_flux is None or time.ticks_diff(maintenant, derniere_donnee) > 3000:
@@ -207,6 +209,12 @@ def executer(ligne):
             perf["cpu_temp"], perf["fps"] = [int(x) for x in arg.split()][:2]
         except ValueError:
             return "ERR utilise : PERF temp_cpu fps"
+        return "OK"
+    if cmd == "JEU_TOTAL":
+        try:
+            perf["total"] = int(arg)
+        except ValueError:
+            return "ERR utilise : JEU_TOTAL minutes"
         return "OK"
     if cmd == "TEMPS":
         try:
@@ -234,7 +242,23 @@ def executer(ligne):
         elif typ == "VERROU":
             evt["verrou"] = 1 if val == "1" else 0
         elif typ == "JEU":
-            evt["jeu"] = "" if val in ("", "-") else val
+            nouveau = "" if val in ("", "-") else val
+            if nouveau != evt["jeu"]:
+                perf["total"] = -1  # le PC renvoie le temps total du nouveau jeu (JEU_TOTAL)
+            evt["jeu"] = nouveau
+        elif typ == "VIDEO":
+            # EVT VIDEO YouTube|Titre de la vidéo ; EVT VIDEO - = plus de vidéo
+            if val in ("", "-"):
+                evt["video"], evt["video_titre"] = "", ""
+            else:
+                source, _, titre = val.partition("|")
+                evt["video"], evt["video_titre"] = source.strip() or "Vidéo", titre.strip()
+        elif typ == "INACTIF":
+            # EVT INACTIF n : PC allumé sans clavier ni souris depuis n minutes (0 = utilisé)
+            try:
+                evt["inactif"] = max(0, int(val))
+            except ValueError:
+                return "ERR utilise : EVT INACTIF minutes"
         elif typ == "ACTION":
             reaction_action(val)
         elif typ == "PIN":

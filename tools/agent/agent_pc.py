@@ -21,6 +21,9 @@
   enregistrés depuis le téléphone (touches, texte, commande administrateur, app, pause…).
 - Phase 8 : aperçu de l'écran du PC dans l'app (capture JPEG à la demande, tous les écrans),
   toucher l'aperçu = cliquer à cet endroit ; adresse /widget pour le widget Android.
+- Phase 9 : jeux lancés hors Steam (DetecteurJeu, tools\\agent\\jeux.json facultatif).
+- Phase 10 : vidéo au premier plan (EVT VIDEO source|titre), PC inutilisé (EVT INACTIF minutes),
+  temps de jeu par jeu et par jour (tools\\agent\\stats_jeux.json, ligne JEU_TOTAL minutes).
 
 Utilisation (dans le dossier Micro) :
   py -X utf8 tools\\agent\\agent_pc.py            port trouvé tout seul, avec console
@@ -697,6 +700,172 @@ class DetecteurJeu:
         self.candidat = (0, 0.0)
         print(f"[agent] jeu détecté hors Steam : {self.nom} ({exe})")
         return self.nom
+
+
+# --- Phase 10 : vidéo en cours (scène cinéma), PC inutilisé, statistiques de jeu ------------
+INACTIF_APRES = 180      # s sans clavier ni souris (et sans jeu ni vidéo) = PC inutilisé
+VIDEO_SON = 8            # s : la vidéo doit faire du son depuis moins de 8 s…
+VIDEO_TOLERANCE = 8      # … et la scène cinéma reste 8 s après (pause courte, épisode suivant)
+FICHIER_STATS = DOSSIER / "stats_jeux.json"   # temps de jeu (jamais dans Git)
+NAVIGATEURS = {"chrome.exe", "msedge.exe", "firefox.exe", "opera.exe", "opera_gx.exe",
+               "brave.exe", "vivaldi.exe"}
+# mot cherché dans le titre de l'onglet -> nom affiché
+SITES_VIDEO = (("youtube", "YouTube"), ("anime-sama", "Anime-Sama"), ("animesama", "Anime-Sama"),
+               ("netflix", "Netflix"), ("crunchyroll", "Crunchyroll"), ("prime video", "Prime Video"),
+               ("disney+", "Disney+"), ("twitch", "Twitch"))
+LECTEURS_VIDEO = {"vlc.exe": "VLC", "mpc-hc.exe": "MPC", "mpc-hc64.exe": "MPC",
+                  "mpc-be64.exe": "MPC", "potplayer64.exe": "PotPlayer",
+                  "potplayermini64.exe": "PotPlayer", "netflix.exe": "Netflix",
+                  "video.ui.exe": "Films et TV", "microsoft.media.player.exe": "Lecteur multimédia"}
+_COMPTEUR_SON = {"m": None, "t": 0.0}
+
+
+def son_en_cours():
+    """Vrai si la sortie audio joue du son ; None si on ne peut pas le savoir (pycaw absent)."""
+    if AudioUtilities is None:
+        return None
+    try:
+        if _COMPTEUR_SON["m"] is None or time.time() - _COMPTEUR_SON["t"] > 30:
+            # recréé toutes les 30 s : suit le changement de sortie (casque <-> haut-parleurs)
+            from ctypes import POINTER, cast
+            from comtypes import CLSCTX_ALL
+            from pycaw.pycaw import IAudioMeterInformation
+            dev = AudioUtilities.GetSpeakers()
+            brut = getattr(dev, "_dev", dev)  # pycaw récent : objet AudioDevice
+            itf = brut.Activate(IAudioMeterInformation._iid_, CLSCTX_ALL, None)
+            _COMPTEUR_SON["m"] = cast(itf, POINTER(IAudioMeterInformation))
+            _COMPTEUR_SON["t"] = time.time()
+        return _COMPTEUR_SON["m"].GetPeakValue() > 0.01
+    except Exception:
+        _COMPTEUR_SON["m"] = None
+        return None
+
+
+def video_premier_plan():
+    """(source, titre) de la vidéo de la fenêtre au premier plan, ou ('', '')."""
+    hwnd, pid = fenetre_premier_plan()
+    if not hwnd or not pid:
+        return "", ""
+    try:
+        exe = psutil.Process(pid).name().lower()
+    except psutil.Error:
+        return "", ""
+    titre = titre_fenetre(hwnd)
+    if exe in LECTEURS_VIDEO:
+        # « film.mkv - Lecteur multimédia VLC » -> « film »
+        t = re.sub(r"\s+-\s+(Lecteur multimédia VLC|VLC media player)$", "", titre, flags=re.I)
+        t = re.sub(r"\.(mkv|mp4|avi|mov|webm|m4v|wmv)$", "", t, flags=re.I)
+        if t.lower() in ("lecteur multimédia vlc", "vlc media player", "netflix"):
+            t = ""
+        t = re.sub(r"[._]+", " ", t).strip()  # « Dune.Part.Two » -> « Dune Part Two »
+        return LECTEURS_VIDEO[exe], t
+    if exe in ("applicationframehost.exe", "wwahost.exe") and "netflix" in titre.lower():
+        return "Netflix", ""
+    if exe in NAVIGATEURS:
+        bas = titre.lower()
+        for cle, nom in SITES_VIDEO:
+            if cle not in bas:
+                continue
+            # « (3) Titre - YouTube - Google Chrome » -> « Titre »
+            avant = []
+            for p in re.split(r"\s+[-–—|]\s+", titre):
+                if cle in p.lower():
+                    break
+                avant.append(p.strip())
+            t = re.sub(r"^\(\d+\)\s*", "", " - ".join(avant)).strip()
+            if nom == "YouTube" and not t:
+                return "", ""  # page d'accueil de YouTube : pas une vidéo
+            return nom, t
+    return "", ""
+
+
+class DetecteurVideo:
+    """Vidéo en cours = fenêtre vidéo au premier plan (YouTube, Netflix, VLC…) qui fait du son."""
+
+    def __init__(self):
+        self.son_vu = 0.0
+        self.actuelle = ""
+        self.perdue = 0.0
+
+    def video(self):
+        """« Source|Titre » (texte pour l'ESP32) ou '' si aucune vidéo."""
+        maintenant = time.time()
+        source, titre = video_premier_plan()
+        son = son_en_cours()
+        if son or son is None:
+            self.son_vu = maintenant
+        if source and maintenant - self.son_vu < VIDEO_SON:
+            texte = texte_ascii(source)
+            if titre:
+                texte += "|" + texte_ascii(titre).replace("|", "/")[:90]
+            self.actuelle, self.perdue = texte, 0.0
+            return texte
+        if self.actuelle:
+            if not self.perdue:
+                self.perdue = maintenant
+            if maintenant - self.perdue < VIDEO_TOLERANCE:
+                return self.actuelle
+            self.actuelle = ""
+        return ""
+
+
+class StatsJeux:
+    """Temps de jeu par jeu et par jour, FPS moyens (tools\\agent\\stats_jeux.json)."""
+
+    def __init__(self):
+        try:
+            d = json.loads(FICHIER_STATS.read_text(encoding="utf-8"))
+            if not isinstance(d, dict):
+                d = {}
+        except (OSError, ValueError):
+            d = {}
+        self.jeux = d.get("jeux") if isinstance(d.get("jeux"), dict) else {}
+        self.jours = d.get("jours") if isinstance(d.get("jours"), dict) else {}
+        self.en_cours = ""
+        self.dernier = 0.0
+        self.sauve = time.time()
+
+    def compter(self, jeu, fps):
+        """Ajoute le temps écoulé au jeu en cours. Renvoie son temps total en minutes (-1 si aucun jeu)."""
+        maintenant = time.time()
+        ecart = min(5.0, maintenant - self.dernier) if self.dernier else 0.0
+        self.dernier = maintenant
+        if not jeu:
+            if self.en_cours:
+                self.en_cours = ""
+                self.sauver()
+            return -1
+        j = self.jeux.setdefault(jeu, {"secondes": 0, "sessions": 0, "fps_total": 0, "fps_n": 0,
+                                       "dernier": ""})
+        if jeu != self.en_cours:
+            self.en_cours = jeu
+            j["sessions"] = j.get("sessions", 0) + 1
+            ecart = 0.0
+        j["secondes"] = j.get("secondes", 0) + ecart
+        if fps is not None and fps > 0:
+            j["fps_total"] = j.get("fps_total", 0) + fps
+            j["fps_n"] = j.get("fps_n", 0) + 1
+        jour = time.strftime("%Y-%m-%d")
+        j["dernier"] = jour
+        du_jour = self.jours.setdefault(jour, {})
+        du_jour[jeu] = du_jour.get(jeu, 0) + ecart
+        if maintenant - self.sauve > 60:
+            self.sauver()
+        return int(j["secondes"] // 60)
+
+    def sauver(self):
+        self.sauve = time.time()
+        for vieux in sorted(self.jours)[:-60]:  # garde les 60 derniers jours
+            del self.jours[vieux]
+        donnees = {"jeux": {n: {k: (round(v, 1) if isinstance(v, float) else v) for k, v in j.items()}
+                            for n, j in self.jeux.items()},
+                   "jours": {d: {n: round(s) for n, s in js.items()} for d, js in self.jours.items()}}
+        try:
+            tmp = FICHIER_STATS.with_suffix(".tmp")
+            tmp.write_text(json.dumps(donnees, ensure_ascii=False, indent=1), encoding="utf-8")
+            os.replace(tmp, FICHIER_STATS)
+        except OSError as e:
+            print(f"[agent] statistiques de jeu non enregistrées : {e}")
 
 
 class LecteurLHM:
@@ -1650,6 +1819,8 @@ class Agent:
         self.lhm = LecteurLHM()
         self.fps = CompteurFPS()
         self.jeux = DetecteurJeu()   # Phase 9 : jeux hors Steam
+        self.video = DetecteurVideo()  # Phase 10 : scène cinéma
+        self.stats = StatsJeux()       # Phase 10 : temps de jeu par jeu
         self.arret_fin = 0.0     # heure prévue de l'arrêt du PC (0 = pas d'arrêt)
         self.lum_esp = max(5, min(100, int(charger_preferences().get("lum_esp", 85))))
         self.lent["ecrans"] = 1
@@ -1818,17 +1989,30 @@ class Agent:
                 print(f"[agent] {nom} : {outil.probleme or 'OK'}")
         nom, externe = sortie_audio()
         jeu = self.jeux.jeu(gpu()[1])
+        verrou = pc_verrouille()
+        # Phase 10 : vidéo au premier plan, PC allumé mais inutilisé (en minutes, 0 = utilisé)
+        video = "" if (jeu or verrou) else self.video.video()
+        repos = inactivite()
+        inactif = int(repos // 60) if repos >= INACTIF_APRES and not (jeu or video or verrou) else 0
         etats = {
             "CASQUE": nom_court_audio(nom) if externe else "-",
             "MANETTE": "1" if manette_connectee() else "0",
-            "VERROU": "1" if pc_verrouille() else "0",
+            "VERROU": "1" if verrou else "0",
             "JEU": texte_ascii(jeu, "Jeu") if jeu else "-",
+            "VIDEO": video or "-",
+            "INACTIF": str(inactif),
         }
         for cle, valeur in etats.items():
             if self.precedent.get(cle) != valeur:
                 self.precedent[cle] = valeur
                 self.liaison.envoyer(f"EVT {cle} {valeur}")
-                print(f"[agent] événement : {cle} = {valeur}")
+                if cle != "INACTIF" or valeur in ("0", str(INACTIF_APRES // 60)):
+                    print(f"[agent] événement : {cle} = {valeur}")
+        # temps total passé sur le jeu en cours (minutes), affiché par l'ESP32 en mode jeu
+        total = self.stats.compter(jeu, self.donnees.get("fps", -1))
+        if jeu and self.precedent.get("JEU_TOTAL") != total:
+            self.precedent["JEU_TOTAL"] = total
+            self.liaison.envoyer(f"JEU_TOTAL {total}")
 
     # --------------------------------------------------------------- pour l'app
     def executer(self, ligne):

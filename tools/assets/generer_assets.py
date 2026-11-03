@@ -492,6 +492,173 @@ def bulle_manette():
 
 
 # ---------------------------------------------------------------------------
+# Phase 10 : salle de cinéma (vidéo), salon calme (PC inutilisé), nouvelles icônes
+# ---------------------------------------------------------------------------
+CARTE_CINE = (16, 6, 12)
+CARTE_CALME = (14, 20, 42)
+
+
+def fond_cine():
+    """Salle de cinéma : rideaux rouges, faisceau du projecteur, rangées de fauteuils."""
+    im = degrade((10, 3, 8), (28, 6, 16), (46, 8, 20), coupure=0.5)
+    # faisceau du projecteur (du coin haut droit vers la mascotte)
+    calque = Image.new("RGBA", im.size, (0, 0, 0, 0))
+    d = ImageDraw.Draw(calque)
+    for k in range(14, 0, -1):
+        a = int(5 + 3 * (14 - k))
+        d.polygon([(W - 4, 6), (W - 4 - k * 8, H), (W - 4 + k * 3, H)], fill=(255, 230, 170, a // 3))
+    im.alpha_composite(calque)
+    halo(im, PERSO_X + PERSO_W // 2, 70, 64, (255, 190, 120), 40)
+    d = ImageDraw.Draw(im, "RGBA")
+    # rideaux : drapé vertical à droite et à gauche de la zone de la mascotte
+    for x0, x1 in ((192, 212), (W - 14, W)):
+        for x in range(x0, x1):
+            t = (math.sin((x - x0) * 0.9) + 1) / 2
+            r = int(120 + 70 * t)
+            d.line((x, 0, x, H), fill=(r, 12, 24, 255))
+    # lambrequin festonné en haut
+    d.rectangle((192, 0, W, 9), fill=(150, 16, 30, 255))
+    for x in range(192, W, 16):
+        d.pieslice((x, 1, x + 16, 17), 0, 180, fill=(150, 16, 30, 255))
+    d.line((192, 9, W, 9), fill=(230, 180, 60, 255))
+    for x in range(192, W, 16):
+        d.arc((x, 1, x + 16, 17), 0, 180, fill=(230, 180, 60, 255))
+    # rangées de fauteuils (silhouettes) en bas
+    for rang, (y, c) in enumerate(((H - 22, (36, 8, 18, 255)), (H - 11, (22, 4, 12, 255)))):
+        for x in range(196 - rang * 9, W, 18):
+            d.rounded_rectangle((x, y, x + 15, y + 16), 5, fill=c)
+    carte(im, (6, 6, 186, 166), CARTE_CINE, (255, 120, 120, 45))
+    return im
+
+
+def fond_calme():
+    """Salon calme au crépuscule : fenêtre sur le ciel, étoiles douces, plante."""
+    im = degrade((14, 18, 44), (34, 44, 86), (70, 76, 120), coupure=0.6)
+    d = ImageDraw.Draw(im, "RGBA")
+    # fenêtre derrière la mascotte
+    fx0, fy0, fx1, fy1 = 214, 14, 304, 104
+    ciel = degrade((30, 40, 100), (120, 90, 150), (240, 150, 120), coupure=0.55)
+    ciel = ciel.crop((0, 0, fx1 - fx0, fy1 - fy0)).resize((fx1 - fx0, fy1 - fy0))
+    im.alpha_composite(ciel, (fx0, fy0))
+    d = ImageDraw.Draw(im, "RGBA")
+    random.seed(5)
+    for _ in range(14):
+        x, y = random.randint(fx0 + 3, fx1 - 3), random.randint(fy0 + 3, fy0 + 45)
+        d.point((x, y), fill=(255, 250, 230, 220))
+    d.rectangle((fx0, fy0, fx1, fy1), outline=(20, 22, 48, 255), width=3)
+    d.line(((fx0 + fx1) // 2, fy0, (fx0 + fx1) // 2, fy1), fill=(20, 22, 48, 255), width=3)
+    d.line((fx0, (fy0 + fy1) // 2, fx1, (fy0 + fy1) // 2), fill=(20, 22, 48, 255), width=3)
+    d.rectangle((fx0 - 6, fy1, fx1 + 6, fy1 + 5), fill=(30, 30, 62, 255))  # rebord
+    halo(im, PERSO_X + PERSO_W // 2, 110, 60, (150, 170, 255), 35)
+    d = ImageDraw.Draw(im, "RGBA")
+    # plante en pot à droite
+    d.polygon([(298, 150), (316, 150), (313, 170), (301, 170)], fill=(170, 90, 70, 255))
+    for k, (dx, h) in enumerate(((-6, 26), (2, 34), (10, 24), (-1, 18))):
+        d.ellipse((306 + dx - 4, 150 - h, 306 + dx + 4, 150 - h + 18), fill=(70, 150, 110, 255))
+    carte(im, (6, 6, 186, 166), CARTE_CALME, (255, 255, 255, 40))
+    return im
+
+
+def i_popcorn(d, T):
+    for k, (x, y) in enumerate(((.30, .22), (.50, .14), (.70, .22), (.40, .32), (.60, .32))):
+        r = T * .14
+        d.ellipse((T * x - r, T * y - r + T * .06, T * x + r, T * y + r + T * .06), fill=(255, 236, 170, 255))
+    d.polygon([(T * .18, T * .40), (T * .82, T * .40), (T * .72, T * .95), (T * .28, T * .95)],
+              fill=(230, 40, 50, 255))
+    for x in (.38, .50, .62):
+        d.line((T * x, T * .42, T * x, T * .93), fill=(255, 255, 255, 255), width=int(T * .05))
+
+
+def i_eau(d, T):
+    d.polygon([(T * .5, T * .06), (T * .22, T * .55), (T * .78, T * .55)], fill=(60, 160, 255, 255))
+    d.ellipse((T * .2, T * .36, T * .8, T * .94), fill=(60, 160, 255, 255))
+    d.ellipse((T * .34, T * .56, T * .46, T * .70), fill=(220, 240, 255, 255))
+
+
+def i_fenetre(d, T):
+    d.rectangle((T * .14, T * .12, T * .86, T * .88), fill=(150, 200, 255, 255), outline=ENCRE, width=int(T * .08))
+    d.line((T * .5, T * .12, T * .5, T * .88), fill=ENCRE, width=int(T * .07))
+    d.line((T * .14, T * .5, T * .86, T * .5), fill=ENCRE, width=int(T * .07))
+
+
+def i_livre(d, T):
+    d.polygon([(T * .5, T * .26), (T * .08, T * .16), (T * .08, T * .80), (T * .5, T * .90)], fill=(0, 170, 220, 255))
+    d.polygon([(T * .5, T * .26), (T * .92, T * .16), (T * .92, T * .80), (T * .5, T * .90)], fill=(0, 140, 200, 255))
+    for k in range(3):
+        y = .36 + k * .14
+        d.line((T * .16, T * y, T * .42, T * (y + .05)), fill=(255, 255, 255, 255), width=int(T * .04))
+        d.line((T * .58, T * (y + .05), T * .84, T * y), fill=(255, 255, 255, 255), width=int(T * .04))
+
+
+def i_lit(d, T):
+    d.rounded_rectangle((T * .08, T * .46, T * .92, T * .74), int(T * .06), fill=(110, 120, 220, 255))
+    d.rounded_rectangle((T * .12, T * .34, T * .36, T * .50), int(T * .06), fill=(235, 235, 250, 255))
+    d.rectangle((T * .08, T * .30, T * .14, T * .88), fill=ENCRE)
+    d.rectangle((T * .86, T * .52, T * .92, T * .88), fill=ENCRE)
+    w = int(T * .06)  # petit « z »
+    d.line((T * .56, T * .06, T * .82, T * .06), fill=ENCRE, width=w)
+    d.line((T * .82, T * .06, T * .56, T * .28), fill=ENCRE, width=w)
+    d.line((T * .56, T * .28, T * .82, T * .28), fill=ENCRE, width=w)
+
+
+def i_thermo(d, T):
+    d.rounded_rectangle((T * .40, T * .06, T * .60, T * .66), int(T * .1), fill=(255, 255, 255, 255), outline=ENCRE, width=int(T * .06))
+    d.ellipse((T * .28, T * .56, T * .72, T * .96), fill=(255, 80, 60, 255), outline=ENCRE, width=int(T * .06))
+    d.rectangle((T * .46, T * .30, T * .54, T * .66), fill=(255, 80, 60, 255))
+
+
+def i_chrono(d, T):
+    d.ellipse((T * .12, T * .16, T * .88, T * .92), fill=(255, 255, 255, 255), outline=ENCRE, width=int(T * .08))
+    d.rectangle((T * .42, T * .02, T * .58, T * .14), fill=ENCRE)
+    d.line((T * .5, T * .54, T * .5, T * .30), fill=ENCRE, width=int(T * .07))
+    d.line((T * .5, T * .54, T * .68, T * .62), fill=(0, 170, 220, 255), width=int(T * .07))
+
+
+def i_etirer(d, T):  # bonhomme qui s'étire
+    d.ellipse((T * .40, T * .06, T * .60, T * .26), fill=ENCRE)
+    d.line((T * .5, T * .26, T * .5, T * .62), fill=ENCRE, width=int(T * .09))
+    d.line((T * .5, T * .34, T * .18, T * .10), fill=ENCRE, width=int(T * .08))
+    d.line((T * .5, T * .34, T * .82, T * .10), fill=ENCRE, width=int(T * .08))
+    d.line((T * .5, T * .62, T * .30, T * .94), fill=ENCRE, width=int(T * .08))
+    d.line((T * .5, T * .62, T * .70, T * .94), fill=ENCRE, width=int(T * .08))
+
+
+def popcorn_main():
+    """Pot de pop-corn tenu par la mascotte dans la salle de cinéma (24 × 26)."""
+    im = Image.new("RGBA", (24 * 8, 26 * 8), (0, 0, 0, 0))
+    i_popcorn(ImageDraw.Draw(im), 24 * 8)
+    im = im.resize((24, 26), Image.LANCZOS)
+    return sprite_transparent(im, (40, 52, 96))
+
+
+def goutte_sueur():
+    """Goutte de sueur près de la tête quand le PC chauffe (8 × 11)."""
+    T = 8
+    im = Image.new("RGBA", (8 * T, 11 * T), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    d.polygon([(4 * T, 0), (1 * T, 6 * T), (7 * T, 6 * T)], fill=(120, 210, 255, 255))
+    d.ellipse((1 * T, 3 * T, 7 * T, 10.5 * T), fill=(120, 210, 255, 255))
+    d.ellipse((2.6 * T, 5 * T, 4 * T, 7 * T), fill=(235, 250, 255, 255))
+    im = im.resize((8, 11), Image.LANCZOS)
+    return sprite_transparent(im, (60, 30, 90))
+
+
+def assets_phase10():
+    """Écrit seulement les fichiers ajoutés en Phase 10 (les autres ne changent pas)."""
+    SORTIE.mkdir(parents=True, exist_ok=True)
+    APERCUS.mkdir(parents=True, exist_ok=True)
+    for nom, f in (("cine", fond_cine), ("calme", fond_calme)):
+        im = f()
+        ecrire(f"fond_{nom}.bin", rgb565(im))
+        im.convert("RGB").save(APERCUS / f"fond_{nom}.png")
+    for nom, f in (("popcorn", i_popcorn), ("eau", i_eau), ("fenetre", i_fenetre), ("livre", i_livre),
+                   ("lit", i_lit), ("thermo", i_thermo), ("chrono", i_chrono), ("etirer", i_etirer)):
+        ecrire(f"ico_{nom}.bin", rgb565(icone(f)))
+    ecrire("popcorn_main.bin", rgb565(popcorn_main()))
+    ecrire("goutte.bin", rgb565(goutte_sueur()))
+
+
+# ---------------------------------------------------------------------------
 # Polices : fichier .fnt, 4 niveaux par pixel (0 = vide … 3 = plein), 1 octet par pixel
 # ---------------------------------------------------------------------------
 CARACTERES = "".join(chr(c) for c in range(32, 127)) + "°éèêëàâäçîïôöùûüÉÈÀÇ…•"
@@ -567,6 +734,9 @@ def main():
                    ("pluie", m_pluie), ("orage", m_orage), ("brouillard", m_brouillard),
                    ("neige", m_neige)):
         ecrire(f"meteo_{nom}.bin", rgb565(icone(f, 24, CARTE_NUIT)))
+
+    print("Phase 10 :")
+    assets_phase10()
 
     print("Polices :")
     police("Inter-Black.otf", 54, "police_fps.fnt", "0123456789-")
