@@ -50,16 +50,16 @@ class VeilleurPC(context: Context, params: WorkerParameters) : Worker(context, p
         val etat = try {
             JSONObject(lire(adresse, token, "/etat_court"))
         } catch (e: Exception) {
-            if (test) notifier(applicationContext, "PC injoignable",
-                "Éteint, en veille ou Tailscale coupé ?", false)
+            if (test) notifier(applicationContext, "PC unreachable",
+                "Off, asleep or Tailscale down?", false)
             return Result.success()
         }
         val repos = etat.optInt("repos_min", 0)
         val occupe = etat.optString("jeu").isNotEmpty() || etat.optString("video").isNotEmpty() ||
             etat.optInt("arret", -1) > 0
         if (test) {
-            notifier(applicationContext, "Test : PC inutilisé depuis ${duree(repos)}",
-                "Voici à quoi ressemblera la notification.", true)
+            notifier(applicationContext, "Test: PC idle for ${duree(repos)}",
+                "This is what the notification will look like.", true)
             return Result.success()
         }
         val memoire = applicationContext.getSharedPreferences(MEMOIRE, Context.MODE_PRIVATE)
@@ -71,9 +71,9 @@ class VeilleurPC(context: Context, params: WorkerParameters) : Worker(context, p
         val debut = System.currentTimeMillis() / 60000L - repos
         if (abs(memoire.getLong("debut_notifie", 0L) - debut) <= 3) return Result.success()
         memoire.edit().putLong("debut_notifie", debut).apply()
-        val texte = if (etat.optBoolean("verrou")) "Le PC est verrouillé. Tu veux l'éteindre ?"
-        else "Personne ne s'en sert. Tu veux l'éteindre ?"
-        notifier(applicationContext, "PC inutilisé depuis ${duree(repos)}", texte, true)
+        val texte = if (etat.optBoolean("verrou")) "The PC is locked. Shut it down?"
+        else "Nobody is using it. Shut it down?"
+        notifier(applicationContext, "PC idle for ${duree(repos)}", texte, true)
         return Result.success()
     }
 
@@ -87,7 +87,7 @@ class VeilleurPC(context: Context, params: WorkerParameters) : Worker(context, p
         private const val PORT = 8765
 
         fun duree(minutes: Int): String =
-            if (minutes < 60) "$minutes min" else "${minutes / 60} h ${"%02d".format(minutes % 60)}"
+            if (minutes < 60) "$minutes min" else "${minutes / 60}h ${"%02d".format(minutes % 60)}"
 
         /** Lance ou arrête la vérification toutes les 15 min. */
         fun programmer(context: Context, actif: Boolean) {
@@ -130,8 +130,8 @@ class VeilleurPC(context: Context, params: WorkerParameters) : Worker(context, p
                 PackageManager.PERMISSION_GRANTED
             ) return
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                val canal = NotificationChannel(CANAL, "PC inutilisé", NotificationManager.IMPORTANCE_DEFAULT)
-                canal.description = "Prévient quand le PC reste allumé sans être utilisé"
+                val canal = NotificationChannel(CANAL, "PC idle", NotificationManager.IMPORTANCE_DEFAULT)
+                canal.description = "Warns when the PC stays on without being used"
                 context.getSystemService(NotificationManager::class.java).createNotificationChannel(canal)
             }
             val ouvrir = PendingIntent.getActivity(
@@ -152,7 +152,7 @@ class VeilleurPC(context: Context, params: WorkerParameters) : Worker(context, p
                     Intent(context, ActionNotification::class.java).setAction(ACTION_ETEINDRE),
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                 )
-                n.addAction(R.drawable.w_power, "Éteindre", eteindre)
+                n.addAction(R.drawable.w_power, "Shut down", eteindre)
             }
             try {
                 NotificationManagerCompat.from(context).notify(ID_NOTIF, n.build())
@@ -176,9 +176,9 @@ class ActionNotification : BroadcastReceiver() {
         Thread {
             val texte = try {
                 VeilleurPC.lire(adresse, token, "/widget?ligne=ARRET").trim()
-                    .ifEmpty { "Le PC s'éteint dans 60 s" }
+                    .ifEmpty { "The PC shuts down in 60 s" }
             } catch (e: Exception) {
-                "PC injoignable"
+                "PC unreachable"
             }
             Handler(Looper.getMainLooper()).post {
                 Toast.makeText(appli, texte, Toast.LENGTH_LONG).show()

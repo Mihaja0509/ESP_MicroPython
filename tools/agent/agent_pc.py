@@ -39,6 +39,7 @@ import atexit
 import base64
 import collections
 import ctypes
+import faulthandler
 import glob
 import io
 import json
@@ -89,6 +90,7 @@ except ImportError:  # websockets pas installé
     PORT_APP, ServeurApp = 8765, None
 
 from master import SuiviMaster  # Phase 11 : suivi du master
+from media_windows import LecteurMedia  # Phase 11-bis : position de la vidéo
 
 DOSSIER = Path(__file__).resolve().parent
 FICHIER_APPS = DOSSIER / "apps.json"
@@ -482,7 +484,7 @@ def sortie_audio():
 
 def diagnostic_audio():
     if AudioUtilities is None:
-        return "pycaw n'est pas installé"
+        return "pycaw is not installed"
     lignes = []
     try:
         defaut = _appareil_defaut()
@@ -494,13 +496,13 @@ def diagnostic_audio():
             props = _texte_proprietes(d)
             indices = [m for m in ("USB", "BTH", "BLUETOOTH", "HDAUDIO", "INTELAUDIO") if m in props]
             marque = "*" if d.id == id_defaut else " "
-            lignes.append(f" {marque} {d.FriendlyName}  |  indices : {', '.join(indices) or 'aucun'}"
-                          f"  |  {len(props)} caractères de propriétés")
+            lignes.append(f" {marque} {d.FriendlyName}  |  hints: {', '.join(indices) or 'none'}"
+                          f"  |  {len(props)} property characters")
     except Exception as e:
-        return f"Erreur audio : {e!r}"
+        return f"Audio error: {e!r}"
     nom, externe = sortie_audio()
-    lignes.append(f"Par défaut : {nom!r} -> {'CASQUE' if externe else 'haut-parleurs'}")
-    return "Sorties audio actives (* = par défaut) :\n" + "\n".join(lignes)
+    lignes.append(f"Default: {nom!r} -> {'HEADSET' if externe else 'speakers'}")
+    return "Active audio outputs (* = default):\n" + "\n".join(lignes)
 
 
 def gpu():
@@ -534,7 +536,7 @@ def jeu_steam():
                 return nom
     except OSError:
         pass
-    return f"Jeu Steam {appid}"
+    return f"Steam game {appid}"
 
 
 # --- Phase 9 : jeux lancés hors Steam (Rockstar, Epic, .exe lancé à la main…) ---------------
@@ -720,7 +722,7 @@ SITES_VIDEO = (("youtube", "YouTube"), ("anime-sama", "Anime-Sama"), ("animesama
 LECTEURS_VIDEO = {"vlc.exe": "VLC", "mpc-hc.exe": "MPC", "mpc-hc64.exe": "MPC",
                   "mpc-be64.exe": "MPC", "potplayer64.exe": "PotPlayer",
                   "potplayermini64.exe": "PotPlayer", "netflix.exe": "Netflix",
-                  "video.ui.exe": "Films et TV", "microsoft.media.player.exe": "Lecteur multimédia"}
+                  "video.ui.exe": "Movies & TV", "microsoft.media.player.exe": "Media Player"}
 _COMPTEUR_SON = {"m": None, "t": 0.0}
 
 
@@ -731,18 +733,38 @@ def son_en_cours():
     try:
         if _COMPTEUR_SON["m"] is None or time.time() - _COMPTEUR_SON["t"] > 30:
             # recréé toutes les 30 s : suit le changement de sortie (casque <-> haut-parleurs)
-            from ctypes import POINTER, cast
             from comtypes import CLSCTX_ALL
             from pycaw.pycaw import IAudioMeterInformation
             dev = AudioUtilities.GetSpeakers()
             brut = getattr(dev, "_dev", dev)  # pycaw récent : objet AudioDevice
             itf = brut.Activate(IAudioMeterInformation._iid_, CLSCTX_ALL, None)
-            _COMPTEUR_SON["m"] = cast(itf, POINTER(IAudioMeterInformation))
+            # QueryInterface renvoie un pointeur COM qui garde l'objet en vie (un simple cast ne le
+            # faisait pas : Windows libérait l'objet et la lecture suivante plantait Python).
+            _COMPTEUR_SON["m"] = itf.QueryInterface(IAudioMeterInformation)
+            _COMPTEUR_SON["dev"] = brut  # garde aussi l'appareil audio en vie
             _COMPTEUR_SON["t"] = time.time()
         return _COMPTEUR_SON["m"].GetPeakValue() > 0.01
     except Exception:
         _COMPTEUR_SON["m"] = None
         return None
+
+
+FICHIER_SITES = DOSSIER / "sites_video.json"   # Phase 11-bis : sites ajoutés depuis l'app (jamais dans Git)
+_SITES_PERSO = {"liste": [], "lu": 0.0}
+
+
+def sites_perso():
+    """[(mot du titre en minuscules, nom affiché)] ajoutés depuis l'app, relus toutes les 10 s."""
+    if time.time() - _SITES_PERSO["lu"] > 10:
+        _SITES_PERSO["lu"] = time.time()
+        try:
+            d = json.loads(FICHIER_SITES.read_text(encoding="utf-8"))
+            _SITES_PERSO["liste"] = [(str(s["mot"]).strip().lower(), str(s["nom"]).strip()) for s in d
+                                     if isinstance(s, dict) and str(s.get("mot", "")).strip()
+                                     and str(s.get("nom", "")).strip()]
+        except (OSError, ValueError, TypeError, KeyError):
+            _SITES_PERSO["liste"] = []
+    return _SITES_PERSO["liste"]
 
 
 def video_premier_plan():
@@ -767,7 +789,7 @@ def video_premier_plan():
         return "Netflix", ""
     if exe in NAVIGATEURS:
         bas = titre.lower()
-        for cle, nom in SITES_VIDEO:
+        for cle, nom in sites_perso() + list(SITES_VIDEO):  # sites ajoutés dans l'app d'abord
             if cle not in bas:
                 continue
             # « (3) Titre - YouTube - Google Chrome » -> « Titre »
@@ -1272,43 +1294,43 @@ def ajouter_app(nom, cible, sorte):
     nom = " ".join(str(nom).split())
     cible = str(cible).strip()
     if not nom or len(nom) > 30:
-        return False, "Nom vide ou trop long (30 caractères max)"
+        return False, "Name empty or too long (30 characters max)"
     if any(ord(c) < 32 for c in nom + cible) or '"' in nom + cible:
-        return False, "Caractères interdits (guillemets, retours à la ligne)"
+        return False, "Forbidden characters (quotes, line breaks)"
     if not cible or len(cible) > 400:
-        return False, "Lien ou chemin vide ou trop long"
+        return False, "Link or path empty or too long"
     if sorte == "web":
         if not re.match(r"^[a-z][a-z0-9+.-]*://", cible, re.I):
             cible = "https://" + cible
         morceaux = urllib.parse.urlparse(cible)
         if (morceaux.scheme.lower() not in ("http", "https")
                 or not re.match(r"^[\w.-]+(:\d{1,5})?$", morceaux.netloc)):
-            return False, "Lien web invalide (ex. https://www.youtube.com)"
+            return False, "Invalid web link (e.g. https://www.youtube.com)"
     elif sorte == "chemin":
         cible = cible.strip('"')
         if type_app(cible) != "chemin":
-            return False, "Chemin Windows invalide (ex. C:\\Jeux\\jeu.exe)"
+            return False, "Invalid Windows path (e.g. C:\\Games\\game.exe)"
         if not os.path.exists(os.path.expandvars(cible)):
-            return False, f"Introuvable sur le PC : {cible}"
+            return False, f"Not found on the PC: {cible}"
     else:
-        return False, "Type inconnu (web ou chemin)"
+        return False, "Unknown type (web or path)"
     apps = charger_apps()
     ancien = trouver_app(apps, nom)
     if ancien is not None:
         del apps[ancien]
     apps[nom] = cible
     _ecrire_apps(apps)
-    return True, ("App modifiée : " if ancien else "App ajoutée : ") + nom
+    return True, ("App updated: " if ancien else "App added: ") + nom
 
 
 def retirer_app(nom):
     apps = charger_apps()
     trouve = trouver_app(apps, str(nom))
     if trouve is None:
-        return False, f"App inconnue : {nom}"
+        return False, f"Unknown app: {nom}"
     del apps[trouve]
     _ecrire_apps(apps)
-    return True, f"App retirée : {trouve}"
+    return True, f"App removed: {trouve}"
 
 
 def lancer_app(cible):
@@ -1338,17 +1360,17 @@ def executer_pc(ligne):
     arg = mots[1].strip() if len(mots) > 1 else ""
 
     if cmd == "APPS":
-        return "Apps : " + ", ".join(charger_apps().keys())
+        return "Apps: " + ", ".join(charger_apps().keys())
     if cmd == "APP":
         apps = charger_apps()
         nom = trouver_app(apps, arg)
         if nom is None:
-            return f"App inconnue : {arg} (ajoute-la depuis le téléphone)"
+            return f"Unknown app: {arg} (add it from the phone)"
         lancer_app(apps[nom])
-        return f"Ouverture : {nom}"
+        return f"Opening: {nom}"
     if cmd in ("LUM", "LUM+", "LUM-"):
         if sbc is None:
-            return "screen_brightness_control n'est pas installé"
+            return "screen_brightness_control is not installed"
         try:
             if cmd == "LUM":
                 v = regler_luminosite(arg)
@@ -1356,37 +1378,37 @@ def executer_pc(ligne):
                 pas = 10 if cmd == "LUM+" else -10
                 v = regler_luminosite(luminosite_actuelle() + pas)
         except Exception as e:
-            return f"Luminosité impossible : {e}"
-        return f"Luminosité : {v} %"
+            return f"Brightness failed: {e}"
+        return f"Brightness: {v} %"
     if cmd == "VOL" and arg.isdigit():
         if AudioUtilities is None:
-            return "pycaw n'est pas installé"
+            return "pycaw is not installed"
         try:
             if comtypes is not None:
                 comtypes.CoInitialize()
-            return f"Volume : {regler_volume(arg)} %"
+            return f"Volume: {regler_volume(arg)} %"
         except Exception as e:
-            return f"Volume impossible : {e}"
+            return f"Volume failed: {e}"
     if cmd == "VERROU":
         ctypes.windll.user32.LockWorkStation()
-        return "PC verrouillé"
+        return "PC locked"
     if cmd == "VEILLE":
         # Ce PC n'a que la veille moderne (S0) : on y entre en verrouillant puis en coupant
         # l'écran (SetSuspendState ne marche pas sans S3 ni hibernation).
         ctypes.windll.user32.LockWorkStation()
         time.sleep(0.5)
         ctypes.windll.user32.PostMessageW(0xFFFF, 0x0112, 0xF170, 2)
-        return "Mise en veille"
+        return "Going to sleep"
     if cmd == "TOUCHES":
         if not touches_pc(arg):
-            return f"Touche inconnue : {arg}"
-        return f"Touches : {arg}"
+            return f"Unknown key: {arg}"
+        return f"Keys: {arg}"
     if cmd == "ARRET":
         subprocess.Popen(f"shutdown /s /t {DUREE_ARRET}", shell=True)
-        return f"Arrêt dans {DUREE_ARRET} s (ANNULER pour annuler)"
+        return f"Shutdown in {DUREE_ARRET} s (ANNULER to cancel)"
     if cmd == "ANNULER":
         subprocess.Popen("shutdown /a", shell=True)
-        return "Arrêt annulé"
+        return "Shutdown cancelled"
     return None
 
 
@@ -1452,7 +1474,7 @@ class EcranNoir:
             self._racine.after(100, self._verifier)
             self._racine.mainloop()
         except Exception as e:
-            self.probleme = f"écran noir indisponible : {e}"
+            self.probleme = f"Black screen unavailable: {e}"
             print(f"[agent] {self.probleme}")
 
     def _verifier(self):
@@ -1586,52 +1608,52 @@ def _trouver_raccourci(liste, nom):
 def valider_raccourci(d):
     """Vérifie un raccourci venu du téléphone. Renvoie (ok, texte, raccourci propre)."""
     if not isinstance(d, dict):
-        return False, "Raccourci invalide", None
+        return False, "Invalid shortcut", None
     nom = " ".join(str(d.get("nom", "")).split())
     if not nom or len(nom) > 30 or any(ord(c) < 32 for c in nom) or '"' in nom:
-        return False, "Nom vide, trop long (30 max) ou avec des guillemets", None
+        return False, "Name empty, too long (30 max) or with quotes", None
     icone = str(d.get("icone", "eclair"))
     if icone not in ICONES_RACCOURCIS:
         icone = "eclair"
     brutes = d.get("etapes")
     if not isinstance(brutes, list) or not brutes:
-        return False, "Ajoute au moins une étape", None
+        return False, "Add at least one step", None
     if len(brutes) > 20:
-        return False, "20 étapes au maximum", None
+        return False, "20 steps maximum", None
     etapes = []
     for n, e in enumerate(brutes, 1):
         if not isinstance(e, dict) or e.get("type") not in TYPES_ETAPES:
-            return False, f"Étape {n} : type inconnu", None
+            return False, f"Step {n}: unknown type", None
         t = e["type"]
         v = str(e.get("valeur", ""))
         propre = {"type": t, "valeur": v}
         if t == "touches":
             if lire_touches(v) is None:
-                return False, f"Étape {n} : touches inconnues « {v} » (ex. ctrl+6, win+x)", None
+                return False, f"Step {n}: unknown keys '{v}' (e.g. ctrl+6, win+x)", None
         elif t == "texte":
             if not v or len(v) > 500:
-                return False, f"Étape {n} : texte vide ou trop long", None
+                return False, f"Step {n}: text empty or too long", None
         elif t == "entree":
             propre["valeur"] = ""
         elif t == "commande":
             if not v.strip() or len(v) > 2000:
-                return False, f"Étape {n} : commande vide ou trop longue", None
+                return False, f"Step {n}: command empty or too long", None
             propre["shell"] = "cmd" if e.get("shell") == "cmd" else "powershell"
             propre["visible"] = bool(e.get("visible", True))
         elif t == "app":
             if not v.strip():
-                return False, f"Étape {n} : choisis une app", None
+                return False, f"Step {n}: pick an app", None
         elif t == "pause":
             try:
                 ms = int(float(v))
             except ValueError:
-                return False, f"Étape {n} : pause en millisecondes (ex. 1500)", None
+                return False, f"Step {n}: pause in milliseconds (e.g. 1500)", None
             if not 0 <= ms <= 30000:
-                return False, f"Étape {n} : pause de 0 à 30000 ms", None
+                return False, f"Step {n}: pause from 0 to 30000 ms", None
             propre["valeur"] = str(ms)
         elif t == "action":
             if not v.strip() or len(v) > 200 or v.strip().upper().startswith("RAC"):
-                return False, f"Étape {n} : action invalide", None
+                return False, f"Step {n}: invalid action", None
         etapes.append(propre)
     return True, "", {"nom": nom, "icone": icone, "etapes": etapes}
 
@@ -1650,18 +1672,18 @@ def ajouter_raccourci(d, ancien=""):
             remplace = True
     liste.append(propre)
     _ecrire_raccourcis(liste)
-    return True, ("Raccourci modifié : " if remplace else "Raccourci ajouté : ") + propre["nom"]
+    return True, ("Shortcut updated: " if remplace else "Shortcut added: ") + propre["nom"]
 
 
 def retirer_raccourci(nom):
     liste = charger_raccourcis()
     i = _trouver_raccourci(liste, nom)
     if i is None:
-        return False, f"Raccourci inconnu : {nom}"
+        return False, f"Unknown shortcut: {nom}"
     nom = liste[i]["nom"]
     del liste[i]
     _ecrire_raccourcis(liste)
-    return True, f"Raccourci retiré : {nom}"
+    return True, f"Shortcut removed: {nom}"
 
 
 def lancer_commande(commande, shell, visible, titre):
@@ -1673,7 +1695,7 @@ def lancer_commande(commande, shell, visible, titre):
     else:
         if visible:
             titre = titre.replace("'", "''")
-            commande = f"$host.UI.RawUI.WindowTitle = 'Dadou : {titre}'\n" + commande
+            commande = f"$host.UI.RawUI.WindowTitle = 'Dadou: {titre}'\n" + commande
         code = base64.b64encode(commande.encode("utf-16-le")).decode("ascii")
         args = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass"]
         args += ["-NoExit"] if visible else []
@@ -1747,7 +1769,7 @@ def _dessiner_curseur(img, x, y):
 def capture_ecran(ecran=0, largeur=960, qualite=60):
     """Capture un écran en JPEG pour le téléphone. Renvoie (octets, infos) ou (None, problème)."""
     if mss is None:
-        return None, "Aperçu indisponible : il manque mss et Pillow sur le PC"
+        return None, "Preview unavailable: mss and Pillow are missing on the PC"
     try:
         with mss.mss() as sct:
             ecrans = _ecrans_mss(sct)
@@ -1772,7 +1794,7 @@ def capture_ecran(ecran=0, largeur=960, qualite=60):
                  "verrou": pc_verrouille()}
         return sortie.getvalue(), infos
     except Exception as e:
-        return None, f"Capture impossible : {e}"
+        return None, f"Capture failed: {e}"
 
 
 def pointeur_pc(ecran, x, y, clic=""):
@@ -1826,6 +1848,8 @@ class Agent:
         self.video = DetecteurVideo()  # Phase 10 : scène cinéma
         self.stats = StatsJeux()       # Phase 10 : temps de jeu par jeu
         self.master = SuiviMaster(DOSSIER)  # Phase 11 : suivi du master
+        self.media = LecteurMedia()          # Phase 11-bis : position de la vidéo
+        self.video_pos = None
         self.arret_fin = 0.0     # heure prévue de l'arrêt du PC (0 = pas d'arrêt)
         self.lum_esp = max(5, min(100, int(charger_preferences().get("lum_esp", 85))))
         self.lent["ecrans"] = 1
@@ -1924,6 +1948,9 @@ class Agent:
             # Phase 11
             "video": "" if p.get("VIDEO", "-") == "-" else p.get("VIDEO", "").split("|")[0],
             "video_titre": p.get("VIDEO", "").partition("|")[2],
+            "video_pos": self.video_pos["pos"] if self.video_pos else -1,
+            "video_duree": self.video_pos["duree"] if self.video_pos else -1,
+            "video_lecture": bool(self.video_pos and self.video_pos["lecture"]),
             "inactif": int(p.get("INACTIF", "0") or 0),
             "jeu_total": p.get("JEU_TOTAL", -1),
             "master_v": self.master.version, "master_actif": self.master.actif,
@@ -1994,7 +2021,7 @@ class Agent:
             for ligne in self.meteo.lignes():
                 self.liaison.envoyer(ligne)
         for nom, outil in (("LibreHardwareMonitor", self.lhm), ("PresentMon", self.fps),
-                           ("Météo", self.meteo)):
+                           ("Météo", self.meteo), ("Lecteur média", self.media)):
             if outil.probleme != self.problemes.get(nom):
                 self.problemes[nom] = outil.probleme
                 print(f"[agent] {nom} : {outil.probleme or 'OK'}")
@@ -2003,6 +2030,15 @@ class Agent:
         verrou = pc_verrouille()
         # Phase 10 : vidéo au premier plan, PC allumé mais inutilisé (en minutes, 0 = utilisé)
         video = "" if (jeu or verrou) else self.video.video()
+        # Phase 11-bis : position de la vidéo (contrôles multimédias de Windows)
+        media = self.media.actuel() if video else None
+        if media and "|" not in video and media["titre"]:
+            video += "|" + texte_ascii(media["titre"]).replace("|", "/")[:90]
+        self.video_pos = media
+        position = f'{media["pos"]} {media["duree"]} {1 if media["lecture"] else 0}' if media else "-"
+        if self.precedent.get("VIDEO_POS") != position:
+            self.precedent["VIDEO_POS"] = position
+            self.liaison.envoyer(f"EVT VIDEO_POS {position}")
         repos = inactivite()
         inactif = int(repos // 60) if repos >= INACTIF_APRES and not (jeu or video or verrou) else 0
         etats = {
@@ -2065,8 +2101,8 @@ class Agent:
         else:
             INJECTION["t"] = time.time()  # touches / souris par l'ESP32 : action du téléphone
         if self.liaison.envoyer(ligne):
-            return "Envoyé à l'ESP32"
-        return "ESP32 non connectée"
+            return "Sent to the ESP32"
+        return "ESP32 not connected"
 
     def _executer_special(self, cmd, arg):
         """Commandes qui ont besoin de l'état de l'agent (Phase 7). None = pas pour moi."""
@@ -2077,10 +2113,10 @@ class Agent:
             if allumer_noir:
                 self.noir.allumer_noir()
                 self.liaison.envoyer("EVT ACTION ECRAN_OFF")
-                return "Écran du PC noir (le PC reste allumé et joignable)"
+                return "PC screen black (the PC stays on and reachable)"
             self.noir.eteindre_noir()
             self.liaison.envoyer("EVT ACTION ECRAN_ON")
-            return "Écran du PC rallumé"
+            return "PC screen back on"
         if cmd == "VEILLE" and self.noir.actif:
             self.noir.eteindre_noir()
             time.sleep(0.3)
@@ -2088,7 +2124,7 @@ class Agent:
         if cmd == "ARRET":
             reste = self.arret_reste()
             if reste > 0:
-                return f"Arrêt déjà prévu dans {reste} s"
+                return f"Shutdown already planned in {reste} s"
             texte = executer_pc("ARRET")
             self.arret_fin = time.time() + DUREE_ARRET
             self.precedent["ARRET"] = True
@@ -2104,7 +2140,7 @@ class Agent:
             try:
                 self.lum_esp = max(5, min(100, int(float(arg))))
             except ValueError:
-                return "Utilise : LUM_ESP 5..100"
+                return "Use: LUM_ESP 5..100"
             p = charger_preferences()
             p["lum_esp"] = self.lum_esp
             try:
@@ -2113,7 +2149,7 @@ class Agent:
                 pass
             self.precedent["LUM_ESP"] = self.lum_esp
             self.liaison.envoyer(f"LUM_ESP {self.lum_esp}")
-            return f"Luminosité de l'ESP32 : {self.lum_esp} %"
+            return f"ESP32 brightness: {self.lum_esp} %"
         if cmd == "RAC":
             return self.lancer_raccourci(arg)
         return None
@@ -2122,11 +2158,11 @@ class Agent:
         liste = charger_raccourcis()
         i = _trouver_raccourci(liste, nom)
         if i is None:
-            return f"Raccourci inconnu : {nom}"
+            return f"Unknown shortcut: {nom}"
         r = liste[i]
         self.liaison.envoyer("EVT ACTION RAC " + texte_ascii(r["nom"]))
         threading.Thread(target=derouler_raccourci, args=(r, self.executer), daemon=True).start()
-        return f"Raccourci : {r['nom']}"
+        return f"Shortcut: {r['nom']}"
 
     # --------------------------------------------------------------- Phase 11 : app
     def jeux_pour_app(self):
@@ -2167,18 +2203,18 @@ class Agent:
             FICHIER_JEUX.write_text(json.dumps({"jeux": j, "pas_des_jeux": p}, ensure_ascii=False,
                                                indent=1), encoding="utf-8")
         except OSError as e:
-            return False, f"jeux.json non enregistré : {e}"
+            return False, f"jeux.json not saved: {e}"
         self.jeux.listes_lues = 0.0  # relu à la prochaine seconde
-        return True, "Liste des jeux enregistrée"
+        return True, "Game list saved"
 
     def pas_un_jeu(self):
         """Le jeu détecté hors Steam n'en est pas un : son .exe va dans « pas_des_jeux »."""
         exe = self.jeux.exe
         if not exe:
-            return False, "Aucun jeu hors Steam en cours (un jeu Steam ne peut pas être retiré)"
+            return False, "No non-Steam game running (a Steam game cannot be removed)"
         jeux, pas = charger_jeux()
         ok, texte = self.jeux_maj([n for n in jeux if n != exe], sorted(pas | {exe}))
-        return ok, (f"{exe} ne sera plus pris pour un jeu" if ok else texte)
+        return ok, (f"{exe} will no longer count as a game" if ok else texte)
 
     def etat_court(self):
         """Pour la notification Android « PC inutilisé » (GET /etat_court)."""
@@ -2188,9 +2224,41 @@ class Agent:
                 "video": "" if p.get("VIDEO", "-") == "-" else p.get("VIDEO", "").split("|")[0],
                 "arret": self.arret_reste()}
 
+    def sites_pour_app(self):
+        """Sites vidéo de l'app, sites reconnus d'office et titre de l'onglet ouvert sur le PC."""
+        hwnd, pid = fenetre_premier_plan()
+        onglet = ""
+        if hwnd and pid:
+            try:
+                if psutil.Process(pid).name().lower() in NAVIGATEURS:
+                    onglet = titre_fenetre(hwnd)[:150]
+            except psutil.Error:
+                pass
+        _SITES_PERSO["lu"] = 0.0
+        return {"perso": [{"mot": m, "nom": n} for m, n in sites_perso()],
+                "defaut": [{"mot": m, "nom": n} for m, n in SITES_VIDEO], "onglet": onglet}
+
+    def sites_maj(self, liste):
+        """Enregistre tools\\agent\\sites_video.json (liste modifiée dans l'app)."""
+        propres = []
+        for s in liste if isinstance(liste, list) else []:
+            if not isinstance(s, dict):
+                continue
+            mot = str(s.get("mot", "")).strip().lower()[:40]
+            nom = str(s.get("nom", "")).strip()[:20]
+            if len(mot) >= 3 and nom and mot not in [p["mot"] for p in propres]:
+                propres.append({"mot": mot, "nom": nom})
+        try:
+            FICHIER_SITES.write_text(json.dumps(propres[:50], ensure_ascii=False, indent=1),
+                                     encoding="utf-8")
+        except OSError as e:
+            return False, f"sites_video.json not saved: {e}"
+        _SITES_PERSO["lu"] = 0.0
+        return True, "Video sites saved"
+
     def master_afficher(self):
-        self.liaison.envoyer("MASTER_INFO " + json.dumps(["lunettes", "Point sur le master"]))
-        return True, "Scène master affichée sur l'ESP32"
+        self.liaison.envoyer("MASTER_INFO " + json.dumps(["lunettes", "Master check-in"]))
+        return True, "Master scene shown on the ESP32"
 
     def rappels_app(self):
         def afficher_pin(pin):
@@ -2221,6 +2289,7 @@ class Agent:
             "master_afficher": self.master_afficher,
             "jeux": self.jeux_pour_app, "jeux_maj": self.jeux_maj, "pas_un_jeu": self.pas_un_jeu,
             "etat_court": self.etat_court,
+            "sites": self.sites_pour_app, "sites_maj": self.sites_maj,
         }
 
     def boucle_lecture(self):
@@ -2304,6 +2373,7 @@ def main():
         sys.stdout = journal
         sys.stderr = journal
         print(f"--- démarrage {time.strftime('%Y-%m-%d %H:%M:%S')} ---")
+        faulthandler.enable(file=journal, all_threads=True)  # plantage natif : ligne exacte dans le journal
 
     agent = Agent(Liaison(args.port))
     threading.Thread(target=agent.boucle_mesures, daemon=True).start()

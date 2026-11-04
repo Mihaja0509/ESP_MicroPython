@@ -19,7 +19,7 @@ void main() {
     expect(e.cpu, 23);
     expect(e.enJeu, isTrue);
     expect(e.gpuTemp, -1);
-    expect(e.meteo.first.textePluie, 'Pluie 80 % vers 15 h');
+    expect(e.meteo.first.textePluie, 'Rain 80 % around 15:00');
     expect(e.arretPrevu, isFalse); // ancien programme PC : pas de champ « arret »
     expect(e.ecrans, 1);
   });
@@ -67,7 +67,7 @@ void main() {
 
   test('favoris : retrouvés même hors ligne', () {
     final cx = Connexion();
-    expect(resoudre(cx, 'cmd:PLAY').nom, 'Lecture / pause');
+    expect(resoudre(cx, 'cmd:PLAY').nom, 'Play / pause');
     expect(resoudre(cx, 'app:netflix').ligne, 'APP netflix');
     expect(resoudre(cx, 'rac:Prépa jeu').ligne, 'RAC Prépa jeu');
     cx.dispose();

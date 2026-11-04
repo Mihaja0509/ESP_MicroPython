@@ -59,7 +59,7 @@ class _CarteNotificationsState extends State<CarteNotifications> {
     } catch (_) {}
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-      content: Text('Test envoyé : la notification arrive dans quelques secondes'),
+      content: Text('Test sent: the notification arrives in a few seconds'),
     ));
   }
 
@@ -70,11 +70,11 @@ class _CarteNotificationsState extends State<CarteNotifications> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Titre('Notification « PC inutilisé »', icone: Icons.notifications_active_rounded),
+          const Titre('"PC idle" notification', icone: Icons.notifications_active_rounded),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
-            title: Text('Me prévenir après $_minutes min sans activité'),
-            subtitle: const Text('Avec un bouton « Éteindre » dans la notification.',
+            title: Text('Notify me after $_minutes min of inactivity'),
+            subtitle: const Text('With a "Shut down" button in the notification.',
                 style: TextStyle(color: Couleurs.gris, fontSize: 12)),
             value: _actif,
             onChanged: (v) => _changer(v, _minutes),
@@ -94,14 +94,14 @@ class _CarteNotificationsState extends State<CarteNotifications> {
             const SizedBox(height: 8),
             OutlinedButton.icon(
               icon: const Icon(Icons.send_rounded),
-              label: const Text('Tester maintenant'),
+              label: const Text('Test now'),
               onPressed: _tester,
             ),
             const SizedBox(height: 8),
             const Text(
-              'Android vérifie environ toutes les 15 min. Sur Xiaomi, pour que ce soit fiable : '
-              'Paramètres → Applications → Dadou → Économiseur de batterie → « Aucune restriction », '
-              'et active « Démarrage automatique ».',
+              'Android checks about every 15 min. On Xiaomi, to make it reliable: '
+              'Settings → Apps → Dadou → Battery saver → "No restrictions", '
+              'and turn on "Autostart".',
               style: TextStyle(color: Couleurs.gris, fontSize: 12, height: 1.4),
             ),
           ],

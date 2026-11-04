@@ -42,7 +42,7 @@ class _EcranJeuxState extends State<EcranJeux> {
       ambiance: Ambiance.jeu,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Mes jeux'),
+          title: const Text('My games'),
           backgroundColor: Colors.transparent,
           actions: [
             IconButton(icon: const Icon(Icons.refresh_rounded), onPressed: cx.demanderJeux),
@@ -85,22 +85,22 @@ class _EcranJeuxState extends State<EcranJeux> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Titre('En cours', icone: Icons.sports_esports_rounded),
+          const Titre('Now playing', icone: Icons.sports_esports_rounded),
           Text(enCours['nom'].toString(), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
           if (exe.isNotEmpty) Text(exe, style: const TextStyle(color: Couleurs.gris, fontSize: 12)),
           const SizedBox(height: 10),
           if (exe.isNotEmpty)
             OutlinedButton.icon(
               icon: const Icon(Icons.block_rounded),
-              label: const Text("Ce n'est pas un jeu"),
+              label: const Text('Not a game'),
               onPressed: () async {
-                final ok = await confirmer(context, "Ce n'est pas un jeu",
-                    '$exe ne déclenchera plus le mode jeu. Tu pourras le remettre plus bas.');
+                final ok = await confirmer(context, 'Not a game',
+                    '$exe will no longer trigger game mode. You can add it back below.');
                 if (ok) await cx.pasUnJeu();
               },
             )
           else
-            const Text('Jeu lancé par Steam : toujours reconnu.',
+            const Text('Game launched by Steam: always recognized.',
                 style: TextStyle(color: Couleurs.gris, fontSize: 12)),
         ],
       ),
@@ -111,13 +111,13 @@ class _EcranJeuxState extends State<EcranJeux> {
     final minutes = [for (final s in semaine) _n((s as Map)['minutes'])];
     final total = minutes.fold<int>(0, (a, b) => a + (b > 0 ? b : 0));
     final maxi = minutes.fold<int>(1, (a, b) => b > a ? b : a);
-    const jours = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
+    const jours = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
     return Carte(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Titre('7 derniers jours', icone: Icons.bar_chart_rounded),
-          Text('Total : ${duree(total)}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+          const Titre('Last 7 days', icone: Icons.bar_chart_rounded),
+          Text('Total: ${duree(total)}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
           const SizedBox(height: 12),
           SizedBox(
             height: 110,
@@ -167,9 +167,9 @@ class _EcranJeuxState extends State<EcranJeux> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Titre('Temps par jeu', icone: Icons.emoji_events_rounded),
+          const Titre('Time per game', icone: Icons.emoji_events_rounded),
           if (stats.isEmpty)
-            const Text('Pas encore de session enregistrée.', style: TextStyle(color: Couleurs.gris)),
+            const Text('No session recorded yet.', style: TextStyle(color: Couleurs.gris)),
           for (final s in stats.take(15))
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 6),
@@ -184,7 +184,7 @@ class _EcranJeuxState extends State<EcranJeux> {
                             style: const TextStyle(fontWeight: FontWeight.w700)),
                         Text(
                           '${_n(s['sessions'])} session${_n(s['sessions']) > 1 ? 's' : ''}'
-                          '${_n(s['fps']) > 0 ? ' • ${_n(s['fps'])} FPS moyens' : ''}'
+                          '${_n(s['fps']) > 0 ? ' • ${_n(s['fps'])} FPS avg' : ''}'
                           '${(s['dernier'] ?? '').toString().isNotEmpty ? ' • ${s['dernier']}' : ''}',
                           style: const TextStyle(color: Couleurs.gris, fontSize: 12),
                         ),
@@ -206,25 +206,25 @@ class _EcranJeuxState extends State<EcranJeux> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Titre('Jeux reconnus', icone: Icons.rule_rounded),
+          const Titre('Recognized games', icone: Icons.rule_rounded),
           const Text(
-            'Les jeux Steam et ceux des dossiers de jeux sont reconnus tout seuls. '
-            'Ici, tu forces un programme (nom du .exe) dans un sens ou dans l\'autre.',
+            'Steam games and games in game folders are recognized automatically. '
+            'Here you force a program (.exe name) one way or the other.',
             style: TextStyle(color: Couleurs.gris, fontSize: 12),
           ),
           const SizedBox(height: 10),
-          const Text('Toujours un jeu', style: TextStyle(fontWeight: FontWeight.w700)),
+          const Text('Always a game', style: TextStyle(fontWeight: FontWeight.w700)),
           const SizedBox(height: 4),
           _puces(jeux, Couleurs.vert, (n) => cx.majJeux(jeux.where((x) => x != n).toList(), pas)),
           const SizedBox(height: 10),
-          const Text('Jamais un jeu', style: TextStyle(fontWeight: FontWeight.w700)),
+          const Text('Never a game', style: TextStyle(fontWeight: FontWeight.w700)),
           const SizedBox(height: 4),
           _puces(pas, Couleurs.rouge, (n) => cx.majJeux(jeux, pas.where((x) => x != n).toList())),
           const SizedBox(height: 12),
           TextField(
             controller: _ajout,
             decoration: const InputDecoration(
-              hintText: 'ex. tennis2.exe',
+              hintText: 'e.g. tennis2.exe',
               border: OutlineInputBorder(),
               isDense: true,
             ),
@@ -235,11 +235,11 @@ class _EcranJeuxState extends State<EcranJeux> {
             children: [
               FilledButton(
                 onPressed: () => _ajouter(jeux, pas, toujours: true),
-                child: const Text('Toujours un jeu'),
+                child: const Text('Always a game'),
               ),
               OutlinedButton(
                 onPressed: () => _ajouter(jeux, pas, toujours: false),
-                child: const Text('Jamais un jeu'),
+                child: const Text('Never a game'),
               ),
             ],
           ),
@@ -249,7 +249,7 @@ class _EcranJeuxState extends State<EcranJeux> {
   }
 
   Widget _puces(List<String> noms, Color couleur, Future<(bool, String)> Function(String) retirer) {
-    if (noms.isEmpty) return const Text('(vide)', style: TextStyle(color: Couleurs.gris, fontSize: 12));
+    if (noms.isEmpty) return const Text('(empty)', style: TextStyle(color: Couleurs.gris, fontSize: 12));
     return Wrap(
       spacing: 6,
       runSpacing: 6,

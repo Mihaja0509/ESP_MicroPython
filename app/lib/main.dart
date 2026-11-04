@@ -104,12 +104,12 @@ class _AccueilState extends State<Accueil> {
               // 6 onglets : le nom s'affiche seulement sous l'onglet choisi (rien ne déborde)
               labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
               destinations: const [
-                NavigationDestination(icon: Icon(Icons.home_rounded), label: 'Accueil'),
-                NavigationDestination(icon: Icon(Icons.mouse_rounded), label: 'Souris'),
-                NavigationDestination(icon: Icon(Icons.monitor_rounded), label: 'Écran'),
+                NavigationDestination(icon: Icon(Icons.home_rounded), label: 'Home'),
+                NavigationDestination(icon: Icon(Icons.mouse_rounded), label: 'Mouse'),
+                NavigationDestination(icon: Icon(Icons.monitor_rounded), label: 'Screen'),
                 NavigationDestination(icon: Icon(Icons.school_rounded), label: 'Master'),
-                NavigationDestination(icon: Icon(Icons.tune_rounded), label: 'Contrôles'),
-                NavigationDestination(icon: Icon(Icons.settings_rounded), label: 'Réglages'),
+                NavigationDestination(icon: Icon(Icons.tune_rounded), label: 'Controls'),
+                NavigationDestination(icon: Icon(Icons.settings_rounded), label: 'Settings'),
               ],
             ),
           ),

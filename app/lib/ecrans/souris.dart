@@ -101,9 +101,9 @@ class _EcranSourisState extends State<EcranSouris> {
           const SizedBox(height: 10),
           Row(
             children: [
-              Expanded(child: _boutonClic('Clic gauche', 'gauche')),
+              Expanded(child: _boutonClic('Left click', 'gauche')),
               const SizedBox(width: 10),
-              Expanded(child: _boutonClic('Clic droit', 'droit')),
+              Expanded(child: _boutonClic('Right click', 'droit')),
             ],
           ),
           const SizedBox(height: 10),
@@ -136,8 +136,8 @@ class _EcranSourisState extends State<EcranSouris> {
               child: Padding(
                 padding: EdgeInsets.all(24),
                 child: Text(
-                  'Glisse un doigt pour bouger la souris\nTouche = clic · Appui long = clic droit\n'
-                  'Deux doigts = défiler · Touche à deux doigts = clic droit',
+                  'Slide a finger to move the mouse\nTap = click · Long press = right click\n'
+                  'Two fingers = scroll · Two-finger tap = right click',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Couleurs.gris, fontSize: 13, height: 1.5),
                 ),
@@ -209,14 +209,14 @@ class _EcranSourisState extends State<EcranSouris> {
                   textInputAction: TextInputAction.send,
                   onSubmitted: (_) => _envoyerTexte(),
                   decoration: const InputDecoration(
-                    hintText: 'Taper du texte sur le PC…',
+                    hintText: 'Type text on the PC…',
                     border: InputBorder.none,
                     isDense: true,
                   ),
                 ),
               ),
               Tooltip(
-                message: 'Appuyer sur Entrée après le texte',
+                message: 'Press Enter after the text',
                 child: FilterChip(
                   label: const Text('↵'),
                   selected: _entreeAuto,
@@ -236,8 +236,8 @@ class _EcranSourisState extends State<EcranSouris> {
               scrollDirection: Axis.horizontal,
               children: [
                 for (final (t, c) in const [
-                  ('Entrée', 'KEY enter'),
-                  ('Échap', 'KEY esc'),
+                  ('Enter', 'KEY enter'),
+                  ('Esc', 'KEY esc'),
                   ('⌫', 'KEY backspace'),
                   ('Tab', 'KEY tab'),
                   ('←', 'KEY left'),

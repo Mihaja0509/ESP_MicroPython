@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../connexion.dart';
 import '../theme.dart';
 import '../notifications.dart';
+import '../widgets/sites_video.dart';
 import '../widget_android.dart';
 
 class EcranReglages extends StatefulWidget {
@@ -35,11 +36,11 @@ class _EcranReglagesState extends State<EcranReglages> {
   }
 
   String get _texteStatut => switch (cx.statut) {
-        Statut.sansAdresse => 'Aucune adresse',
-        Statut.deconnecte => 'PC injoignable (nouvel essai toutes les 3 s)',
-        Statut.connexion => 'Connexion…',
-        Statut.appairage => 'Connecté, appairage nécessaire',
-        Statut.connecte => 'Connecté et appairé',
+        Statut.sansAdresse => 'No address',
+        Statut.deconnecte => 'PC unreachable (retrying every 3 s)',
+        Statut.connexion => 'Connecting…',
+        Statut.appairage => 'Connected, pairing needed',
+        Statut.connecte => 'Connected and paired',
       };
 
   @override
@@ -51,12 +52,12 @@ class _EcranReglagesState extends State<EcranReglages> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Titre('Adresse du PC', icone: Icons.computer_rounded),
+              const Titre('PC address', icone: Icons.computer_rounded),
               TextField(
                 controller: _adresse,
                 keyboardType: TextInputType.url,
                 decoration: const InputDecoration(
-                  hintText: 'ex. 100.101.102.103 (adresse Tailscale du PC)',
+                  hintText: 'e.g. 100.101.102.103 (Tailscale address of the PC)',
                   border: OutlineInputBorder(),
                   isDense: true,
                 ),
@@ -70,7 +71,7 @@ class _EcranReglagesState extends State<EcranReglages> {
                   ),
                   FilledButton(
                     onPressed: () => cx.changerAdresse(_adresse.text),
-                    child: const Text('Se connecter'),
+                    child: const Text('Connect'),
                   ),
                 ],
               ),
@@ -82,17 +83,17 @@ class _EcranReglagesState extends State<EcranReglages> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Titre('Appairage', icone: Icons.verified_user_rounded),
+              const Titre('Pairing', icone: Icons.verified_user_rounded),
               if (cx.statut == Statut.appairage) ...[
                 const Text(
-                  "Pour que personne d'autre ne puisse commander ton PC, ce téléphone doit être "
-                  "appairé une fois avec un code affiché sur l'écran de l'ESP32.",
+                  "So that nobody else can control your PC, this phone must be "
+                  "paired once with a code shown on the ESP32 screen.",
                   style: TextStyle(color: Couleurs.doux),
                 ),
                 const SizedBox(height: 10),
                 OutlinedButton.icon(
                   icon: const Icon(Icons.pin_rounded),
-                  label: Text(cx.pinAffiche ? 'Nouveau code' : "Afficher le code sur l'ESP32"),
+                  label: Text(cx.pinAffiche ? 'New code' : 'Show the code on the ESP32'),
                   onPressed: cx.demanderPin,
                 ),
                 if (cx.pinAffiche) ...[
@@ -105,7 +106,7 @@ class _EcranReglagesState extends State<EcranReglages> {
                           keyboardType: TextInputType.number,
                           maxLength: 6,
                           decoration: const InputDecoration(
-                            hintText: 'Code à 6 chiffres',
+                            hintText: '6-digit code',
                             border: OutlineInputBorder(),
                             isDense: true,
                             counterText: '',
@@ -115,10 +116,10 @@ class _EcranReglagesState extends State<EcranReglages> {
                       const SizedBox(width: 10),
                       FilledButton(
                         onPressed: () {
-                          cx.envoyerPin(_pin.text, 'Téléphone de Mihaja');
+                          cx.envoyerPin(_pin.text, "Mihaja's phone");
                           _pin.clear();
                         },
-                        child: const Text('Valider'),
+                        child: const Text('Confirm'),
                       ),
                     ],
                   ),
@@ -128,12 +129,12 @@ class _EcranReglagesState extends State<EcranReglages> {
                   children: [
                     const Icon(Icons.check_circle_rounded, color: Couleurs.vert),
                     const SizedBox(width: 8),
-                    const Expanded(child: Text('Ce téléphone est appairé.')),
-                    TextButton(onPressed: cx.oublierAppairage, child: const Text('Oublier')),
+                    const Expanded(child: Text('This phone is paired.')),
+                    TextButton(onPressed: cx.oublierAppairage, child: const Text('Forget')),
                   ],
                 )
               else
-                const Text("Connecte-toi d'abord au PC.", style: TextStyle(color: Couleurs.gris)),
+                const Text('Connect to the PC first.', style: TextStyle(color: Couleurs.gris)),
             ],
           ),
         ),
@@ -142,16 +143,18 @@ class _EcranReglagesState extends State<EcranReglages> {
         const SizedBox(height: 14),
         const CarteNotifications(),
         const SizedBox(height: 14),
+        CarteSitesVideo(cx: cx),
+        const SizedBox(height: 14),
         const Carte(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Titre('Depuis n\'importe où', icone: Icons.public_rounded),
+              Titre('From anywhere', icone: Icons.public_rounded),
               Text(
-                '1. Installe Tailscale sur le PC et sur ce téléphone, avec le même compte.\n'
-                '2. Dans Tailscale sur le PC, copie l\'adresse du PC (elle commence par 100.).\n'
-                '3. Mets cette adresse ci-dessus : l\'app marche alors à la maison, en 4G, partout.\n'
-                '4. À la maison sans Tailscale, l\'adresse locale du PC (192.168…) marche aussi.',
+                '1. Install Tailscale on the PC and on this phone, with the same account.\n'
+                '2. In Tailscale on the PC, copy the PC address (it starts with 100.).\n'
+                '3. Put this address above: the app then works at home, on 4G, everywhere.\n'
+                '4. At home without Tailscale, the local PC address (192.168…) works too.',
                 style: TextStyle(color: Couleurs.doux, height: 1.5),
               ),
             ],

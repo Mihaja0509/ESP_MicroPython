@@ -46,12 +46,12 @@ class EcranAccueil extends StatelessWidget {
 
   Widget _entete(EtatPC e) {
     final (texte, couleur) = !cx.connecte
-        ? ('Hors ligne', Couleurs.gris)
+        ? ('Offline', Couleurs.gris)
         : e.verrou
-            ? ('PC verrouillé', Couleurs.doux)
+            ? ('PC locked', Couleurs.doux)
             : e.enJeu
-                ? ('Mode jeu', Couleurs.magenta)
-                : ('Connecté', Couleurs.vert);
+                ? ('Game mode', Couleurs.magenta)
+                : ('Connected', Couleurs.vert);
     final heure = TimeOfDay.now();
     return Row(
       crossAxisAlignment: CrossAxisAlignment.end,
@@ -67,7 +67,7 @@ class EcranAccueil extends StatelessWidget {
                 style: const TextStyle(fontSize: 44, fontWeight: FontWeight.w900, color: Colors.white, height: 1),
               ),
               const SizedBox(height: 6),
-              const Text('Bonjour Mihaja !',
+              const Text('Hello Mihaja!',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Couleurs.doux)),
               const SizedBox(height: 10),
               AnimatedContainer(
@@ -90,7 +90,7 @@ class EcranAccueil extends StatelessWidget {
               if (cx.connecte && !e.esp)
                 const Padding(
                   padding: EdgeInsets.only(top: 8),
-                  child: Text('ESP32 non branchée',
+                  child: Text('ESP32 not plugged in',
                       style: TextStyle(fontSize: 12, color: Couleurs.orange)),
                 ),
             ],
@@ -102,10 +102,10 @@ class EcranAccueil extends StatelessWidget {
 
   Widget _horsLigne(BuildContext context) {
     final texte = switch (cx.statut) {
-      Statut.sansAdresse => "Indique l'adresse de ton PC dans l'onglet Réglages.",
-      Statut.appairage => "Ce téléphone n'est pas encore appairé : va dans Réglages.",
-      Statut.connexion => 'Connexion au PC…',
-      _ => 'PC injoignable. Il est peut-être éteint, ou Tailscale est coupé. Nouvel essai toutes les 3 s.',
+      Statut.sansAdresse => "Enter your PC's address in the Settings tab.",
+      Statut.appairage => "This phone is not paired yet: go to Settings.",
+      Statut.connexion => 'Connecting to the PC…',
+      _ => 'PC unreachable. It may be off, or Tailscale is down. Retrying every 3 s.',
     };
     return Carte(
       child: Row(
@@ -235,7 +235,7 @@ class EcranAccueil extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Titre('Météo', icone: Icons.cloud_queue_rounded),
+          const Titre('Weather', icone: Icons.cloud_queue_rounded),
           for (var i = 0; i < e.meteo.length && i < 2; i++)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 6),
@@ -247,7 +247,7 @@ class EcranAccueil extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(i == 0 ? "Aujourd'hui" : 'Demain',
+                        Text(i == 0 ? 'Today' : 'Tomorrow',
                             style: const TextStyle(color: Couleurs.gris, fontSize: 12)),
                         Text('${e.meteo[i].tmax}° / ${e.meteo[i].tmin}°',
                             style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
@@ -273,11 +273,11 @@ class EcranAccueil extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Titre('Favoris', icone: Icons.star_rounded),
+          const Titre('Favorites', icone: Icons.star_rounded),
           if (favoris.isEmpty)
             const Text(
-              'Dans Contrôles, fais un appui long sur un raccourci, une app ou une action, '
-              'puis « Ajouter aux favoris ». Ils apparaîtront ici et dans le widget du téléphone.',
+              'In Controls, long-press a shortcut, an app or an action, '
+              'then "Add to favorites". They will show up here and in the phone widget.',
               style: TextStyle(color: Couleurs.gris, fontSize: 13),
             )
           else
@@ -307,14 +307,14 @@ class EcranAccueil extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Titre('Actions rapides', icone: Icons.flash_on_rounded),
+          const Titre('Quick actions', icone: Icons.flash_on_rounded),
           GrilleBoutons(
             colonnes: 4,
             enfants: [
-              BoutonAction(icone: Icons.lock_rounded, texte: 'Verrou', onTap: () => cx.cmd('VERROU')),
+              BoutonAction(icone: Icons.lock_rounded, texte: 'Lock', onTap: () => cx.cmd('VERROU')),
               BoutonAction(
                   icone: e.ecranNoir ? Icons.desktop_windows_rounded : Icons.desktop_access_disabled_rounded,
-                  texte: e.ecranNoir ? 'Rallumer' : 'Écran noir',
+                  texte: e.ecranNoir ? 'Wake' : 'Black screen',
                   couleur: e.ecranNoir ? Couleurs.orange : Couleurs.cyan,
                   onTap: () => cx.cmd('ECRAN_BASCULE')),
               BoutonAction(
@@ -324,10 +324,10 @@ class EcranAccueil extends StatelessWidget {
                 onTap: () => cx.cmd(e.ecranEsp ? 'ECRAN_ESP 0' : 'ECRAN_ESP 1'),
               ),
               BoutonAction(
-                  icone: Icons.space_dashboard_rounded, texte: 'Bureau', onTap: () => cx.cmd('KEY win+d')),
+                  icone: Icons.space_dashboard_rounded, texte: 'Desktop', onTap: () => cx.cmd('KEY win+d')),
               BoutonAction(
                 icone: Icons.sports_esports_rounded,
-                texte: 'Mes jeux',
+                texte: 'My games',
                 couleur: Couleurs.magenta,
                 onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => EcranJeux(cx: cx))),
               ),

@@ -43,9 +43,9 @@ MAGENTA = (255, 40, 200)
 ENCRE = (40, 40, 80)
 OR = (240, 190, 80)
 
-JOURS = ("Lun.", "Mar.", "Mer.", "Jeu.", "Ven.", "Sam.", "Dim.")
-MOIS = ("janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.",
-        "nov.", "déc.")
+JOURS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+MOIS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct",
+        "Nov", "Dec")
 
 DUREE_BANDEAU = 2400
 DUREE_REACTION = 1400
@@ -65,14 +65,14 @@ TRAVAIL_MONTRE_MS = 20000
 INFO_MS = 15000            # après un événement (nouveau résultat, réunion dans 1 h…)
 FICHIER_BRIEFING = "briefing.txt"
 RAPPELS_MASTER = (
-    ("livre", "Une section à la fois."), ("stylo", "Le fond, puis le style."),
-    ("stylo", "Cite pendant que tu écris."), ("livre", "Source notée ?"),
-    ("livre", "1 article lu > 3 ouverts."), ("lunettes", "Relis ta question."),
-    ("calendrier", "Question au superviseur ?"), ("graphe", "Mesure 3 fois, conclus 1."),
-    ("graphe", "Hz, mode, temp. : notés ?"), ("livre", "Ta matrice est à jour ?"),
-    ("livre", "Quartile de la revue vu ?"), ("stylo", "Structure, puis affine."),
-    ("chrono", "Commit, puis pause."), ("chrono", "Cinq minutes de pause ?"),
-    ("stylo", "One section at a time."), ("stylo", "Write first, polish later."),
+    ("livre", "One section at a time."), ("stylo", "Content first, style later."),
+    ("stylo", "Cite while you write."), ("livre", "Source noted?"),
+    ("livre", "1 paper read > 3 opened."), ("lunettes", "Reread your question."),
+    ("calendrier", "A question for your SV?"), ("graphe", "Measure 3x, conclude 1x."),
+    ("graphe", "Hz, mode, temp: noted?"), ("livre", "Matrix up to date?"),
+    ("livre", "Journal quartile checked?"), ("stylo", "Structure, then refine."),
+    ("chrono", "Commit, then rest."), ("chrono", "Five-minute break?"),
+    ("stylo", "Write first, polish later."),
 )
 COULEURS_SOURCES = {"YouTube": (255, 70, 70), "Netflix": (229, 30, 40), "VLC": (255, 150, 30),
                     "Anime-Sama": (90, 170, 255), "Crunchyroll": (255, 130, 40),
@@ -103,10 +103,10 @@ def _anneau(rayon, n=36):
 
 
 def duree_texte(minutes):
-    """95 -> « 1 h 35 » ; 40 -> « 40 min »."""
+    """95 -> « 1h 35 » ; 40 -> « 40 min »."""
     if minutes < 60:
         return "%d min" % minutes
-    return "%d h %02d" % (minutes // 60, minutes % 60)
+    return "%dh %02d" % (minutes // 60, minutes % 60)
 
 
 class Interface:
@@ -378,28 +378,28 @@ class Interface:
         if nouveau == "eteint":
             self.bandeau = None  # rien ne reste affiché
         elif ancien == "eteint":
-            self.reagir("coucou", "Bonjour Mihaja !")  # le PC vient de démarrer
+            self.reagir("coucou", "Hello Mihaja!")  # le PC vient de démarrer
         elif nouveau == "arret":
-            self.reagir("power", "Arrêt du PC")
+            self.reagir("power", "PC shutdown")
         elif ancien == "arret":
             pass  # arrêt annulé : le bandeau « Arrêt annulé » vient de main.py
         elif ancien is None:
-            self.reagir("coucou", "Bonjour !")
+            self.reagir("coucou", "Hello!")
         elif nouveau == "absent":
             # pas de bandeau si on était verrouillé (on dort déjà) ou réveillé quelques secondes
             if ancien != "verrou" and duree_ancien > 20000:
-                self.reagir("power", "À bientôt !")
+                self.reagir("power", "See you!")
         elif ancien == "absent":
             if duree_ancien > 60000:  # seulement après une vraie absence (pas un réveil bref)
-                self.reagir("coucou", "Bonjour Mihaja !")
+                self.reagir("coucou", "Hello Mihaja!")
         elif nouveau == "jeu":
-            self.reagir("manette", "Mode jeu")
+            self.reagir("manette", "Gaming")
         elif nouveau == "verrou":
-            self.reagir("cadenas", "PC verrouillé")
+            self.reagir("cadenas", "PC locked")
         elif ancien == "verrou":
-            self.reagir("coucou", "Re-bonjour !")
+            self.reagir("coucou", "Hi again!")
         elif nouveau == "video":
-            self.reagir("popcorn", "Bon visionnage !")
+            self.reagir("popcorn", "Enjoy the show!")
         elif nouveau == "calme":
             if ancien != "master":
                 self.bulle = None  # la scène calme arrive sans bruit
@@ -408,7 +408,7 @@ class Interface:
         elif ancien == "master" or (ancien == "calme" and nouveau == "master"):
             pass
         elif ancien == "calme" and duree_ancien > 10 * 60000:
-            self.reagir("coucou", "Te revoilà !", bandeau=False)
+            self.reagir("coucou", "You're back!", bandeau=False)
 
     def _particules(self, t, mode):
         fb = self.fb
@@ -507,14 +507,14 @@ class Interface:
         for i, j in enumerate(etat["meteo"][:2]):
             y = 86 + i * 40
             fb.blit(self.icones_meteo.get(j["icone"], self.icones_meteo["nuage"]), 14, y + 3, CLE)
-            jour = "Aujourd'hui" if i == 0 else "Demain"
+            jour = "Today" if i == 0 else "Tomorrow"
             x = self.f_s.ecrire(fb, jour, 46, y, GRIS, carte) + 6
             self.f_s.ecrire(fb, "%d° / %d°" % (j["tmax"], j["tmin"]), x, y, BLANC, carte)
             if j["pluie"] >= 20 and j["heure_pluie"] is not None:
-                texte = "Pluie %d %% vers %d h" % (j["pluie"], j["heure_pluie"])
+                texte = "Rain %d %% at %d:00" % (j["pluie"], j["heure_pluie"])
                 couleur = CYAN
             else:
-                texte, couleur = "Pas de pluie prévue", VERT
+                texte, couleur = "No rain expected", VERT
             self.f_xs.ecrire(fb, texte, 46, y + 17, couleur, carte)
 
     def _barre_temp(self, y, nom, valeur, carte):
@@ -540,15 +540,15 @@ class Interface:
         if time.ticks_diff(maintenant, self.pause_suivante) >= 0:
             self.pause_suivante = time.ticks_add(maintenant, PAUSE_JEU_MS)
             heures = self._age(self.jeu_debut, maintenant) // 3600000
-            self.reagir("chrono", "%d h de jeu : petite pause ?" % heures, duree=6000)
+            self.reagir("chrono", "%dh of play: take a break?" % heures, duree=6000)
         tg, tc = etat["gpu"]["temp"], etat["perf"]["cpu_temp"]
         self.chaud = tg >= CHAUFFE_GPU or tc >= CHAUFFE_CPU
         if self.chaud and time.ticks_diff(maintenant, self.chauffe_suivante) >= 0:
             self.chauffe_suivante = time.ticks_add(maintenant, CHAUFFE_RAPPEL_MS)
             if tg >= CHAUFFE_GPU:
-                self.reagir("thermo", "GPU chaud : %d°" % tg, duree=5000)
+                self.reagir("thermo", "GPU hot: %d°" % tg, duree=5000)
             else:
-                self.reagir("thermo", "CPU chaud : %d°" % tc, duree=5000)
+                self.reagir("thermo", "CPU hot: %d°" % tc, duree=5000)
 
     def _courbe_fps(self, x0, y0, w, h):
         """Petite courbe des FPS de la dernière minute (vert ≥ 60, orange ≥ 30, rouge)."""
@@ -607,10 +607,10 @@ class Interface:
             textes.append("   •   ".join(morceaux))
         if len(self.hist_fps) >= 10:
             moyenne = sum(self.hist_fps) // len(self.hist_fps)
-            textes.append("1 min : min %d  •  moy. %d FPS" % (min(self.hist_fps), moyenne))
+            textes.append("1 min: min %d  •  avg %d FPS" % (min(self.hist_fps), moyenne))
         total = etat["perf"].get("total", -1)
         if total >= 1:
-            textes.append("Total sur ce jeu : %s" % duree_texte(total))
+            textes.append("Game total: %s" % duree_texte(total))
         if textes:
             texte = textes[(time.ticks_ms() // 5000) % len(textes)]
             self.f_xs.ecrire(fb, self.f_xs.couper(texte, 172), 16, 148, GRIS, carte)
@@ -621,18 +621,18 @@ class Interface:
         reste = time.ticks_diff(etat["arret_fin"], maintenant)
         total = max(1000, etat.get("arret_total", 60000))
         if reste > 0:
-            self.f_s.ecrire(fb, "Arrêt du PC dans", 16, 10, DOUX, carte)
+            self.f_s.ecrire(fb, "PC shutdown in", 16, 10, DOUX, carte)
             secondes = (reste + 999) // 1000
             x = self.f_fps.ecrire(fb, "%d" % secondes, 14, 30, ORANGE if secondes > 10 else ROUGE, carte)
             self.f_m.ecrire(fb, "s", x + 6, 74, DOUX, carte)
             fb.fill_rect(18, 112, 158, 4, rgb565(45, 40, 80))
             fb.fill_rect(18, 112, 158 * min(reste, total) // total, 4, rgb565(*ORANGE))
-            self.f_xs.ecrire(fb, "Tu peux encore annuler", 16, 126, GRIS, carte)
-            self.f_xs.ecrire(fb, "depuis l'app Dadou.", 16, 142, GRIS, carte)
+            self.f_xs.ecrire(fb, "You can still cancel", 16, 126, GRIS, carte)
+            self.f_xs.ecrire(fb, "from the Dadou app.", 16, 142, GRIS, carte)
         else:
-            self.f_m.ecrire(fb, "Au revoir !", 16, 52, BLANC, carte)
-            self.f_xs.ecrire(fb, "Le PC s'éteint…", 16, 82, DOUX, carte)
-            self.f_xs.ecrire(fb, "À bientôt Mihaja", 16, 100, GRIS, carte)
+            self.f_m.ecrire(fb, "Goodbye!", 16, 52, BLANC, carte)
+            self.f_xs.ecrire(fb, "PC turning off…", 16, 82, DOUX, carte)
+            self.f_xs.ecrire(fb, "See you Mihaja", 16, 100, GRIS, carte)
 
     def _scene_video(self, etat, carte, maintenant):
         """Salle de cinéma : la source (YouTube, Netflix…), le titre, l'heure et le volume."""
@@ -646,11 +646,19 @@ class Interface:
         titre = etat["evt"].get("video_titre", "")
         lignes = self._lignes(self.f_m, titre, 166, 3) if titre else []
         if not lignes:
-            lignes = ["Bon visionnage !"]
+            lignes = ["Enjoy the show!"]
+        pos = etat["evt"].get("video_pos")
+        avancement = bool(pos) and pos[1] > 0
+        if avancement:
+            # 2 lignes de titre au plus (avec « … ») : place pour la barre d'avancement
+            lignes = self._lignes(self.f_m, titre, 166, 2) if titre else lignes[:2]
         for i, l in enumerate(lignes):
             self.f_m.ecrire(fb, l, 16, 34 + i * 20, BLANC, carte)
+        if avancement:
+            self._avancement(pos, couleur, carte, maintenant)
+        else:
+            fb.fill_rect(16, 112, 162, 1, rgb565(70, 30, 40))
         # bas de la carte : heure + volume
-        fb.fill_rect(16, 112, 162, 1, rgb565(70, 30, 40))
         lt = time.localtime()
         if lt[0] >= 2025:
             self.f_m.ecrire(fb, "%02d:%02d" % (lt[3], lt[4]), 16, 122, DOUX, carte)
@@ -663,28 +671,50 @@ class Interface:
             fb.blit(self.ico_casque, 16, 148, CLE)
             self.f_xs.ecrire(fb, self.f_xs.couper(etat["evt"]["casque"], 146), 30, 148, GRIS, carte)
 
+    def _temps_video(self, s):
+        """152 -> « 02:32 » ; 3752 -> « 1:02:32 »."""
+        if s >= 3600:
+            return "%d:%02d:%02d" % (s // 3600, s // 60 % 60, s % 60)
+        return "%02d:%02d" % (s // 60, s % 60)
+
+    def _avancement(self, pos, couleur, carte, maintenant):
+        fb = self.fb
+        p, duree, lecture, recu = pos
+        if lecture:
+            p += time.ticks_diff(maintenant, recu) // 1000
+        p = max(0, min(p, duree))
+        self.f_xs.ecrire(fb, self._temps_video(p), 16, 88, BLANC, carte)
+        fin = self._temps_video(duree)
+        self.f_xs.ecrire(fb, fin, 178 - self.f_xs.largeur(fin), 88, GRIS, carte)
+        if not lecture:
+            self.f_xs.ecrire_centre(fb, "Pause", 97, 88, ORANGE, carte)
+        fb.fill_rect(16, 106, 162, 4, rgb565(60, 30, 40))
+        x = 16 + 162 * p // duree
+        fb.fill_rect(16, 106, x - 16, 4, rgb565(*(couleur if lecture else ORANGE)))
+        fb.fill_rect(x - 2, 103, 4, 10, rgb565(*BLANC))  # curseur
+
     def _suggestions(self, etat):
         """Petites idées douces quand le PC est allumé sans que personne s'en serve."""
         lt = time.localtime()
         heure = lt[3] if lt[0] >= 2025 else 12
-        liste = [("eau", "Une pause eau ?"),
-                 ("livre", "Où en es-tu dans tes recherches ?"),
-                 ("etirer", "Lève-toi et étire-toi un peu"),
-                 ("livre", "Une page de ton mémoire aujourd'hui ?")]
+        liste = [("eau", "Time for some water?"),
+                 ("livre", "How is your research going?"),
+                 ("etirer", "Stand up and stretch a bit"),
+                 ("livre", "One page of your thesis today?")]
         jours = etat.get("meteo") or []
         if jours:
             j = jours[0]
             if j["icone"] in ("pluie", "orage"):
-                liste.insert(0, ("fenetre", "Il pleut : les fenêtres sont fermées ?"))
+                liste.insert(0, ("fenetre", "It's raining: windows closed?"))
             elif j["pluie"] >= 40 and j["heure_pluie"] is not None and j["heure_pluie"] >= heure:
-                liste.insert(0, ("fenetre", "Pluie vers %d h : pense à fermer les fenêtres" % j["heure_pluie"]))
+                liste.insert(0, ("fenetre", "Rain around %d: close the windows" % j["heure_pluie"]))
         if self.dernier_jeu and 8 <= heure < 23:
-            liste.append(("manette", "Reprendre %s ?" % self.dernier_jeu))
+            liste.append(("manette", "Back to %s?" % self.dernier_jeu))
         if heure >= 23 or heure < 5:
-            liste.insert(0, ("lit", "Il se fait tard : au lit bientôt ?"))
+            liste.insert(0, ("lit", "It's late: bed soon?"))
         minutes = etat["evt"].get("inactif", 0)
         if minutes >= 30:
-            liste.append(("power", "Le PC t'attend depuis %s : l'éteindre ?" % duree_texte(minutes)))
+            liste.append(("power", "PC idle for %s: shut it down?" % duree_texte(minutes)))
         return liste
 
     def _scene_calme(self, etat, carte, maintenant):
@@ -705,28 +735,28 @@ class Interface:
             self.f_s.ecrire(fb, l, 52, y, BLANC, carte)
             y += 16
         minutes = etat["evt"].get("inactif", 0)
-        self.f_xs.ecrire(fb, "Pas d'activité depuis %s" % duree_texte(max(1, minutes)), 16, 148, GRIS, carte)
+        self.f_xs.ecrire(fb, "No activity for %s" % duree_texte(max(1, minutes)), 16, 148, GRIS, carte)
 
     def _scene_nuit(self, etat, carte, mode):
         fb = self.fb
         self._heure_date(carte, y_heure=4)
-        titre = "PC verrouillé" if mode == "verrou" else "PC en veille"
+        titre = "PC locked" if mode == "verrou" else "PC asleep"
         self.f_xs.ecrire(fb, titre, 120, 58, GRIS, carte)
         jours = etat.get("meteo") or []
         if not jours:
-            self.f_m.ecrire(fb, "Je t'attends…", 16, 92, DOUX, carte)
-            self.f_xs.ecrire(fb, "Météo : en attente du PC…", 16, 118, GRIS, carte)
+            self.f_m.ecrire(fb, "I'm waiting…", 16, 92, DOUX, carte)
+            self.f_xs.ecrire(fb, "Weather: waiting for PC…", 16, 118, GRIS, carte)
             return
         for i, j in enumerate(jours[:2]):
             y = 76 + i * 45
             fb.blit(self.icones_meteo.get(j["icone"], self.icones_meteo["nuage"]), 14, y + 4, CLE)
-            self.f_xs.ecrire(fb, "Aujourd'hui" if i == 0 else "Demain", 46, y, GRIS, carte)
+            self.f_xs.ecrire(fb, "Today" if i == 0 else "Tomorrow", 46, y, GRIS, carte)
             self.f_m.ecrire(fb, "%d° / %d°" % (j["tmax"], j["tmin"]), 46, y + 11, BLANC, carte)
             if j["pluie"] >= 20 and j["heure_pluie"] is not None:
-                texte = "Pluie %d %% vers %d h" % (j["pluie"], j["heure_pluie"])
+                texte = "Rain %d %% at %d:00" % (j["pluie"], j["heure_pluie"])
                 couleur = CYAN
             else:
-                texte, couleur = "Pas de pluie prévue", VERT
+                texte, couleur = "No rain expected", VERT
             self.f_xs.ecrire(fb, texte, 46, y + 30, couleur, carte)
 
     # ------------------------------------------------------------------ mascotte
@@ -833,7 +863,7 @@ class Interface:
         if self._tard():
             if self.tard_jour != lt[2]:
                 self.tard_jour = lt[2]
-                self.reagir("lit", "Tard : à demain ?", duree=3000)
+                self.reagir("lit", "Late: see you tomorrow?", duree=3000)
             return
         icone, texte = RAPPELS_MASTER[self.rappel % len(RAPPELS_MASTER)]
         self.rappel += 1
@@ -856,9 +886,9 @@ class Interface:
             jours, titre = e[0], e[1]
             couleur = ROUGE if jours <= 3 else (ORANGE if jours <= 7 else CYAN_AR)
             if jours == 0:
-                x = self.f_m.ecrire(fb, "Aujourd'hui", 14, 16, couleur, carte) + 8
+                x = self.f_m.ecrire(fb, "Today", 14, 16, couleur, carte) + 8
             else:
-                x = self.f_m.ecrire(fb, "J-", 14, 24, couleur, carte)
+                x = self.f_m.ecrire(fb, "D-", 14, 24, couleur, carte)
                 x = self.f_heure.ecrire(fb, "%d" % jours, x + 1, 2, couleur, carte) + 8
             lignes = self._lignes(self.f_s, titre, 180 - x, 2)
             y = 26 - len(lignes) * 8
@@ -866,8 +896,8 @@ class Interface:
                 self.f_s.ecrire(fb, l, x, y, TEXTE_AR, carte)
                 y += 16
         else:
-            self.f_m.ecrire(fb, "Aucune échéance", 14, 12, GRIS_AR, carte)
-            self.f_xs.ecrire(fb, "Ajoute-la dans l'app Dadou", 14, 32, GRIS_AR, carte)
+            self.f_m.ecrire(fb, "No deadline", 14, 12, GRIS_AR, carte)
+            self.f_xs.ecrire(fb, "Add one in the Dadou app", 14, 32, GRIS_AR, carte)
         # 2. objectif du jour
         o = m.get("o")
         if o:
@@ -878,21 +908,21 @@ class Interface:
                 fb.line(19, 61, 24, 54, rgb565(*VERT))
             self.f_m.ecrire(fb, self.f_m.couper(o[0], 150), 30, 49, VERT if fait else TEXTE_AR, carte)
         else:
-            self.f_s.ecrire(fb, "Objectif du jour : dans l'app", 14, 51, GRIS_AR, carte)
+            self.f_s.ecrire(fb, "Daily goal: set it in the app", 14, 51, GRIS_AR, carte)
         fb.fill_rect(14, 69, 166, 1, rgb565(40, 50, 78))
         # 3. lecture et rédaction
         l = m.get("l")
         if l:
-            texte = "%d/%d" % (l[0], l[1]) if l[1] else "%d lus" % l[0]
-            self._barre_master(73, "Lecture", texte, l[0], l[1], VIOLET, carte)
+            texte = "%d/%d" % (l[0], l[1]) if l[1] else "%d read" % l[0]
+            self._barre_master(73, "Reading", texte, l[0], l[1], VIOLET, carte)
         else:
-            self.f_xs.ecrire(fb, "Lecture : choisis les dossiers", 16, 76, GRIS_AR, carte)
+            self.f_xs.ecrire(fb, "Reading: pick the folders", 16, 76, GRIS_AR, carte)
         r = m.get("r")
         if r:
-            texte = "%d/%d mots" % (r[0], r[1]) if r[1] else "%d mots" % r[0]
-            self._barre_master(93, "Rédaction", texte, r[0], r[1], VERT, carte)
+            texte = "%d/%d" % (r[0], r[1]) if r[1] else "%d" % r[0]
+            self._barre_master(93, "Words", texte, r[0], r[1], VERT, carte)
         else:
-            self.f_xs.ecrire(fb, "Rédaction : choisis le mémoire", 16, 96, GRIS_AR, carte)
+            self.f_xs.ecrire(fb, "Writing: pick your thesis", 16, 96, GRIS_AR, carte)
         fb.fill_rect(14, 115, 166, 1, rgb565(40, 50, 78))
         # 4. dernier résultat de mesure, sinon prochaine réunion, sinon temps du jour
         x = m.get("x")
@@ -903,15 +933,15 @@ class Interface:
             self._courbe_master(m.get("c") or [], 16, 137, 84, 12)
             details = ("%s %s Hz" % (x[3], x[4])).strip() if (x[3] or x[4]) else ""
             self.f_xs.ecrire(fb, self.f_xs.couper(details, 74), 106, 135, GRIS_AR, carte)
-            self.f_xs.ecrire(fb, "%d essai%s" % (x[2], "s" if x[2] > 1 else ""), 106, 148, GRIS_AR, carte)
+            self.f_xs.ecrire(fb, "%d run%s" % (x[2], "s" if x[2] > 1 else ""), 106, 148, GRIS_AR, carte)
         elif reu:
-            self.f_s.ecrire(fb, "Réunion : %s" % reu[0], 14, 119, CYAN_AR, carte)
+            self.f_s.ecrire(fb, "Meeting: %s" % reu[0], 14, 119, CYAN_AR, carte)
             for i, ligne in enumerate(self._lignes(self.f_xs, reu[1], 166, 2)):
                 self.f_xs.ecrire(fb, ligne, 14, 136 + i * 12, TEXTE_AR, carte)
         else:
-            self.f_s.ecrire(fb, "Master : %s aujourd'hui" % (duree_texte(t) if t else "0 min"),
+            self.f_s.ecrire(fb, "Master: %s today" % (duree_texte(t) if t else "0 min"),
                             14, 119, CYAN_AR, carte)
-            self.f_xs.ecrire(fb, "Phase : %s" % m.get("p", ""), 14, 140, GRIS_AR, carte)
+            self.f_xs.ecrire(fb, "Phase: %s" % m.get("p", ""), 14, 140, GRIS_AR, carte)
 
     def _courbe_master(self, serie, x0, y0, w, h):
         """Médianes de latence des 10 dernières sessions (plus bas = mieux)."""

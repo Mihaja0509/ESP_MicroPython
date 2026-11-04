@@ -122,6 +122,7 @@ class Connexion extends ChangeNotifier {
   /// Phase 11 : données de l'onglet Master et de la page « Mes jeux » (null = pas encore reçues).
   Map<String, dynamic>? master;
   Map<String, dynamic>? jeux;
+  Map<String, dynamic>? sites; // Phase 11-bis
   int _masterV = -1;
 
   bool get appaire => _token != null;
@@ -203,7 +204,7 @@ class Connexion extends ChangeNotifier {
   void _perdu() {
     _fermerCanal();
     for (final c in _attentes.values) {
-      if (!c.isCompleted) c.complete((false, 'Connexion au PC perdue'));
+      if (!c.isCompleted) c.complete((false, 'Connection to the PC lost'));
     }
     _attentes.clear();
     if (_fini) return;
@@ -263,7 +264,7 @@ class Connexion extends ChangeNotifier {
           SharedPreferences.getInstance().then((p) => p.remove('token'));
           statut = Statut.appairage;
         }
-        _annoncer((m['texte'] ?? 'Erreur').toString());
+        _annoncer((m['texte'] ?? 'Error').toString());
       case 'pin_affiche':
         pinAffiche = true;
       case 'etat':
@@ -303,9 +304,12 @@ class Connexion extends ChangeNotifier {
       case 'apercu_info':
         apercuInfos.value = Map<String, dynamic>.from(m);
       case 'apercu_erreur':
-        apercuInfos.value = {'erreur': (m['texte'] ?? 'Aperçu impossible').toString()};
+        apercuInfos.value = {'erreur': (m['texte'] ?? 'Preview failed').toString()};
       case 'master':
         master = Map<String, dynamic>.from(m);
+        return true;
+      case 'sites':
+        sites = Map<String, dynamic>.from(m);
         return true;
       case 'jeux':
         jeux = Map<String, dynamic>.from(m);
@@ -350,18 +354,18 @@ class Connexion extends ChangeNotifier {
     final cle = m['type'] as String;
     final ancienne = _attentes.remove(cle);
     if (ancienne != null && !ancienne.isCompleted) {
-      ancienne.complete((false, 'Remplacé par une nouvelle demande'));
+      ancienne.complete((false, 'Replaced by a new request'));
     }
     final c = Completer<(bool, String)>();
     _attentes[cle] = c;
     if (_canal == null) {
       _attentes.remove(cle);
-      return Future.value((false, 'PC non connecté'));
+      return Future.value((false, 'PC not connected'));
     }
     _envoyer(m);
     return c.future.timeout(const Duration(seconds: 6), onTimeout: () {
       _attentes.remove(cle);
-      return (false, 'Le PC ne répond pas');
+      return (false, 'The PC is not responding');
     });
   }
 
@@ -379,6 +383,11 @@ class Connexion extends ChangeNotifier {
       _demander({'type': 'jeux_maj', 'jeux': jeux, 'pas_des_jeux': pasDesJeux});
 
   Future<(bool, String)> pasUnJeu() => _demander({'type': 'pas_un_jeu'});
+
+  void demanderSites() => _envoyer({'type': 'sites'});
+
+  Future<(bool, String)> majSites(List<Map<String, String>> liste) =>
+      _demander({'type': 'sites_maj', 'sites': liste});
 
   // ------------------------------------------------------------- appairage
   void demanderPin() => _envoyer({'type': 'demande_pin'});

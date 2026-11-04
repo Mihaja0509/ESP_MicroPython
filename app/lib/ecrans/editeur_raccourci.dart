@@ -17,34 +17,34 @@ class _TypeEtape {
 }
 
 const List<_TypeEtape> _types = [
-  _TypeEtape('touches', 'Touches', 'Un raccourci clavier : ctrl+6, win+x, alt+tab…', Icons.keyboard_rounded),
-  _TypeEtape('commande', 'Commande administrateur',
-      'PowerShell ou cmd, lancée directement en administrateur (sans Win+X ni fenêtre de confirmation)',
+  _TypeEtape('touches', 'Keys', 'A keyboard shortcut: ctrl+6, win+x, alt+tab…', Icons.keyboard_rounded),
+  _TypeEtape('commande', 'Admin command',
+      'PowerShell or cmd, run directly as administrator (no Win+X, no confirmation window)',
       Icons.terminal_rounded),
-  _TypeEtape('texte', 'Écrire un texte', 'Tape le texte dans la fenêtre ouverte', Icons.text_fields_rounded),
-  _TypeEtape('entree', 'Appuyer sur Entrée', 'Valide (touche Entrée)', Icons.keyboard_return_rounded),
-  _TypeEtape('app', 'Ouvrir une app', 'Une app de l\'onglet Apps', Icons.apps_rounded),
-  _TypeEtape('pause', 'Attendre', 'Laisse le temps à une fenêtre de s\'ouvrir', Icons.hourglass_bottom_rounded),
-  _TypeEtape('action', 'Action Dadou', 'Volume, lecture, écran noir, verrouillage…', Icons.bolt_rounded),
+  _TypeEtape('texte', 'Type a text', 'Types the text in the open window', Icons.text_fields_rounded),
+  _TypeEtape('entree', 'Press Enter', 'Confirms (Enter key)', Icons.keyboard_return_rounded),
+  _TypeEtape('app', 'Open an app', 'An app from the Apps tab', Icons.apps_rounded),
+  _TypeEtape('pause', 'Wait', 'Gives a window time to open', Icons.hourglass_bottom_rounded),
+  _TypeEtape('action', 'Dadou action', 'Volume, playback, black screen, lock…', Icons.bolt_rounded),
 ];
 
 _TypeEtape _infos(String type) => _types.firstWhere((t) => t.type == type, orElse: () => _types.first);
 
 /// Actions proposées pour l'étape « Action Dadou » (ligne envoyée au PC, nom affiché).
 const List<(String, String)> _actionsDadou = [
-  ('PLAY', 'Lecture / pause'),
-  ('NEXT', 'Suivant'),
-  ('PREV', 'Précédent'),
+  ('PLAY', 'Play / pause'),
+  ('NEXT', 'Next'),
+  ('PREV', 'Previous'),
   ('VOL+', 'Volume +'),
   ('VOL-', 'Volume −'),
-  ('MUTE', 'Muet'),
-  ('VOL 30', 'Volume à 30 %'),
-  ('ECRAN_OFF', 'Écran noir'),
-  ('ECRAN_ON', 'Rallumer l\'écran'),
-  ('VERROU', 'Verrouiller'),
-  ('KEY win+d', 'Afficher le bureau'),
-  ('ECRAN_ESP 0', 'Éteindre l\'écran de l\'ESP32'),
-  ('ECRAN_ESP 1', 'Allumer l\'écran de l\'ESP32'),
+  ('MUTE', 'Mute'),
+  ('VOL 30', 'Volume at 30 %'),
+  ('ECRAN_OFF', 'Black screen'),
+  ('ECRAN_ON', 'Wake the screen'),
+  ('VERROU', 'Lock'),
+  ('KEY win+d', 'Show the desktop'),
+  ('ECRAN_ESP 0', 'Turn off the ESP32 screen'),
+  ('ECRAN_ESP 1', 'Turn on the ESP32 screen'),
 ];
 
 /// Une étape en cours de modification.
@@ -129,10 +129,10 @@ class _EditeurRaccourciState extends State<EditeurRaccourci> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Titre('Pour commencer', icone: Icons.auto_awesome_rounded),
+          const Titre('Getting started', icone: Icons.auto_awesome_rounded),
           const Text(
-            'Plus besoin de Win+X → Terminal (admin) → taper → Entrée : une étape « Commande '
-            'administrateur » fait tout ça d\'un coup, sans fenêtre de confirmation.',
+            'No more Win+X → Terminal (admin) → type → Enter: an "Admin command" '
+            'step does it all at once, with no confirmation window.',
             style: TextStyle(color: Couleurs.doux, fontSize: 13),
           ),
           const SizedBox(height: 10),
@@ -142,8 +142,8 @@ class _EditeurRaccourciState extends State<EditeurRaccourci> {
             children: [
               ActionChip(
                 avatar: const Icon(Icons.terminal_rounded, size: 18),
-                label: const Text('Commande admin'),
-                onPressed: () => _modele('Commande admin', 'terminal', [_EtapeEdit('commande', '')]),
+                label: const Text('Admin command'),
+                onPressed: () => _modele('Admin command', 'terminal', [_EtapeEdit('commande', '')]),
               ),
               ActionChip(
                 avatar: const Icon(Icons.keyboard_rounded, size: 18),
@@ -152,8 +152,8 @@ class _EditeurRaccourciState extends State<EditeurRaccourci> {
               ),
               ActionChip(
                 avatar: const Icon(Icons.sports_esports_rounded, size: 18),
-                label: const Text('Relancer Steam'),
-                onPressed: () => _modele('Relancer Steam', 'jeu', [
+                label: const Text('Restart Steam'),
+                onPressed: () => _modele('Restart Steam', 'jeu', [
                   _EtapeEdit(
                       'commande',
                       'Stop-Process -Name steam -Force -ErrorAction SilentlyContinue\n'
@@ -260,10 +260,10 @@ class _EditeurRaccourciState extends State<EditeurRaccourci> {
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(fontWeight: FontWeight.w700)),
                 ),
-                _petitBouton(Icons.arrow_upward_rounded, 'Monter', i > 0 ? () => _deplacer(i, -1) : null),
-                _petitBouton(Icons.arrow_downward_rounded, 'Descendre',
+                _petitBouton(Icons.arrow_upward_rounded, 'Move up', i > 0 ? () => _deplacer(i, -1) : null),
+                _petitBouton(Icons.arrow_downward_rounded, 'Move down',
                     i < _etapes.length - 1 ? () => _deplacer(i, 1) : null),
-                _petitBouton(Icons.delete_outline_rounded, 'Supprimer', () => _supprimer(i), couleur: Couleurs.rouge),
+                _petitBouton(Icons.delete_outline_rounded, 'Delete', () => _supprimer(i), couleur: Couleurs.rouge),
               ],
             ),
             Padding(
@@ -285,9 +285,9 @@ class _EditeurRaccourciState extends State<EditeurRaccourci> {
           enableSuggestions: false,
           decoration: const InputDecoration(
             isDense: true,
-            hintText: 'ex. ctrl+6',
-            helperText: 'ctrl, shift, alt, win + une lettre, un chiffre, f1…f24, enter, esc, tab, '
-                'espace, suppr, haut, bas, gauche, droite…',
+            hintText: 'e.g. ctrl+6',
+            helperText: 'ctrl, shift, alt, win + a letter, a digit, f1…f24, enter, esc, tab, '
+                'space, delete, up, down, left, right…',
             helperMaxLines: 3,
           ),
         );
@@ -296,10 +296,10 @@ class _EditeurRaccourciState extends State<EditeurRaccourci> {
           controller: e.champ,
           minLines: 1,
           maxLines: 4,
-          decoration: const InputDecoration(isDense: true, hintText: 'Texte à écrire'),
+          decoration: const InputDecoration(isDense: true, hintText: 'Text to type'),
         );
       case 'entree':
-        return const Text('Appuie sur la touche Entrée.', style: TextStyle(color: Couleurs.gris));
+        return const Text('Presses the Enter key.', style: TextStyle(color: Couleurs.gris));
       case 'commande':
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -313,7 +313,7 @@ class _EditeurRaccourciState extends State<EditeurRaccourci> {
               style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
               decoration: InputDecoration(
                 isDense: true,
-                hintText: e.shell == 'cmd' ? r'ex. ipconfig /flushdns' : 'ex. Restart-Service Spooler',
+                hintText: e.shell == 'cmd' ? r'e.g. ipconfig /flushdns' : 'e.g. Restart-Service Spooler',
                 border: const OutlineInputBorder(),
               ),
             ),
@@ -340,11 +340,11 @@ class _EditeurRaccourciState extends State<EditeurRaccourci> {
               dense: true,
               value: e.visible,
               onChanged: (v) => setState(() => e.visible = v),
-              title: const Text('Fenêtre visible'),
+              title: const Text('Visible window'),
               subtitle: Text(
                 e.visible
-                    ? 'La fenêtre reste ouverte pour voir le résultat.'
-                    : 'Sans fenêtre : Dadou attend la fin avant l\'étape suivante.',
+                    ? 'The window stays open so you can see the result.'
+                    : 'No window: Dadou waits for the end before the next step.',
                 style: const TextStyle(fontSize: 12),
               ),
             ),
@@ -355,14 +355,14 @@ class _EditeurRaccourciState extends State<EditeurRaccourci> {
         if (noms.isEmpty) {
           return TextField(
             controller: e.champ,
-            decoration: const InputDecoration(isDense: true, hintText: 'Nom de l\'app (onglet Apps)'),
+            decoration: const InputDecoration(isDense: true, hintText: 'App name (Apps tab)'),
           );
         }
         if (!noms.contains(e.champ.text) && e.champ.text.isNotEmpty) noms.insert(0, e.champ.text);
         return DropdownButtonFormField<String>(
           isExpanded: true,
           initialValue: e.champ.text.isEmpty ? null : e.champ.text,
-          hint: const Text('Choisis une app'),
+          hint: const Text('Pick an app'),
           items: [
             for (final n in noms)
               DropdownMenuItem(value: n, child: Text(majuscule(n), overflow: TextOverflow.ellipsis)),
@@ -377,7 +377,7 @@ class _EditeurRaccourciState extends State<EditeurRaccourci> {
           decoration: const InputDecoration(
             isDense: true,
             suffixText: 'ms',
-            helperText: '1000 ms = 1 seconde (30 s au plus)',
+            helperText: '1000 ms = 1 second (30 s max)',
           ),
         );
       default: // action
@@ -388,7 +388,7 @@ class _EditeurRaccourciState extends State<EditeurRaccourci> {
         return DropdownButtonFormField<String>(
           isExpanded: true,
           initialValue: e.champ.text.isEmpty ? null : e.champ.text,
-          hint: const Text('Choisis une action'),
+          hint: const Text('Pick an action'),
           items: [
             for (final a in lignes)
               DropdownMenuItem(value: a.$1, child: Text(a.$2, overflow: TextOverflow.ellipsis)),
@@ -401,16 +401,16 @@ class _EditeurRaccourciState extends State<EditeurRaccourci> {
   // ------------------------------------------------------------- enregistrer
   String? _verifier() {
     final nom = _nom.text.trim();
-    if (nom.isEmpty) return 'Donne un nom au raccourci.';
-    if (nom.length > 30) return 'Nom trop long (30 caractères max).';
-    if (nom.contains('"')) return 'Pas de guillemets dans le nom.';
-    if (_etapes.isEmpty) return 'Ajoute au moins une étape.';
+    if (nom.isEmpty) return 'Give the shortcut a name.';
+    if (nom.length > 30) return 'Name too long (30 characters max).';
+    if (nom.contains('"')) return 'No quotes in the name.';
+    if (_etapes.isEmpty) return 'Add at least one step.';
     for (var i = 0; i < _etapes.length; i++) {
       final e = _etapes[i].vers();
       final vide = e.valeur.trim().isEmpty;
-      if (vide && e.type != 'entree') return 'Étape ${i + 1} : à remplir.';
+      if (vide && e.type != 'entree') return 'Step ${i + 1}: fill it in.';
       if (e.type == 'pause' && (int.tryParse(e.valeur) ?? 99999) > 30000) {
-        return 'Étape ${i + 1} : 30000 ms au maximum.';
+        return 'Step ${i + 1}: 30000 ms maximum.';
       }
     }
     return null;
@@ -443,8 +443,8 @@ class _EditeurRaccourciState extends State<EditeurRaccourci> {
   Future<void> _supprimerTout() async {
     final r = widget.existant;
     if (r == null) return;
-    final ok = await confirmer(context, 'Supprimer « ${r.nom} » ?', 'Le raccourci disparaîtra du PC.',
-        bouton: 'Supprimer', couleur: Couleurs.rouge);
+    final ok = await confirmer(context, 'Delete "${r.nom}"?', 'The shortcut will be removed from the PC.',
+        bouton: 'Delete', couleur: Couleurs.rouge);
     if (!ok || !mounted) return;
     final (fait, texte) = await cx.retirerRaccourci(r.nom);
     if (!mounted) return;
@@ -467,11 +467,11 @@ class _EditeurRaccourciState extends State<EditeurRaccourci> {
       child: Scaffold(
         appBar: AppBar(
           backgroundColor: Colors.transparent,
-          title: Text(nouveau ? 'Nouveau raccourci' : 'Modifier le raccourci'),
+          title: Text(nouveau ? 'New shortcut' : 'Edit the shortcut'),
           actions: [
             if (!nouveau)
               IconButton(
-                tooltip: 'Supprimer',
+                tooltip: 'Delete',
                 icon: const Icon(Icons.delete_rounded, color: Couleurs.rouge),
                 onPressed: _enCours ? null : _supprimerTout,
               ),
@@ -489,10 +489,10 @@ class _EditeurRaccourciState extends State<EditeurRaccourci> {
                       controller: _nom,
                       maxLength: 30,
                       textCapitalization: TextCapitalization.sentences,
-                      decoration: const InputDecoration(labelText: 'Nom', hintText: 'ex. Prépa jeu'),
+                      decoration: const InputDecoration(labelText: 'Name', hintText: 'e.g. Game prep'),
                     ),
                     const SizedBox(height: 4),
-                    const Text('Icône', style: TextStyle(color: Couleurs.gris, fontSize: 12)),
+                    const Text('Icon', style: TextStyle(color: Couleurs.gris, fontSize: 12)),
                     const SizedBox(height: 6),
                     Wrap(
                       spacing: 6,
@@ -513,12 +513,12 @@ class _EditeurRaccourciState extends State<EditeurRaccourci> {
               ),
               const SizedBox(height: 14),
               if (nouveau && _etapes.isEmpty) ...[_carteModeles(), const SizedBox(height: 14)],
-              const Titre('Étapes (dans l\'ordre)', icone: Icons.format_list_numbered_rounded),
+              const Titre('Steps (in order)', icone: Icons.format_list_numbered_rounded),
               for (var i = 0; i < _etapes.length; i++) _carteEtape(i),
               OutlinedButton.icon(
                 onPressed: _etapes.length >= 20 ? null : _ajouterEtape,
                 icon: const Icon(Icons.add_rounded),
-                label: const Text('Ajouter une étape'),
+                label: const Text('Add a step'),
               ),
               if (_erreur != null)
                 Padding(
@@ -531,7 +531,7 @@ class _EditeurRaccourciState extends State<EditeurRaccourci> {
                 icon: _enCours
                     ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
                     : const Icon(Icons.check_rounded),
-                label: Text(cx.connecte ? 'Enregistrer sur le PC' : 'PC non connecté'),
+                label: Text(cx.connecte ? 'Save on the PC' : 'PC not connected'),
               ),
             ],
           ),

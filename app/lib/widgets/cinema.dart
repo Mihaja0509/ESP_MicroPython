@@ -28,6 +28,12 @@ const _couleurs = {
       _ => ('left', 'right', 'f', null),
     };
 
+/// 152 -> « 02:32 » ; 3752 -> « 1:02:32 »
+String _temps(int s) {
+  String deux(int n) => n.toString().padLeft(2, '0');
+  return s >= 3600 ? '${s ~/ 3600}:${deux(s ~/ 60 % 60)}:${deux(s % 60)}' : '${deux(s ~/ 60)}:${deux(s % 60)}';
+}
+
 class CarteCinema extends StatelessWidget {
   final Connexion cx;
   final EtatPC etat;
@@ -70,11 +76,34 @@ class CarteCinema extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            etat.videoTitre.isEmpty ? 'Bon visionnage !' : etat.videoTitre,
+            etat.videoTitre.isEmpty ? 'Enjoy the show!' : etat.videoTitre,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: Colors.white),
           ),
+          if (etat.videoDuree > 0) ...[
+            const SizedBox(height: 12),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(3),
+              child: LinearProgressIndicator(
+                value: (etat.videoPos / etat.videoDuree).clamp(0.0, 1.0),
+                minHeight: 5,
+                color: etat.videoLecture ? couleur : Couleurs.orange,
+                backgroundColor: Colors.white.withValues(alpha: 0.1),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Text(_temps(etat.videoPos), style: const TextStyle(fontSize: 12, color: Colors.white)),
+                const Spacer(),
+                if (!etat.videoLecture)
+                  const Text('Pause', style: TextStyle(fontSize: 12, color: Couleurs.orange)),
+                const Spacer(),
+                Text(_temps(etat.videoDuree), style: const TextStyle(fontSize: 12, color: Couleurs.gris)),
+              ],
+            ),
+          ],
           const SizedBox(height: 14),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -92,11 +121,11 @@ class CarteCinema extends StatelessWidget {
             enfants: [
               BoutonAction(icone: Icons.volume_down_rounded, texte: 'Vol -', onTap: () => cx.cmd('VOL-')),
               BoutonAction(icone: Icons.volume_up_rounded, texte: 'Vol +', onTap: () => cx.cmd('VOL+')),
-              BoutonAction(icone: Icons.fullscreen_rounded, texte: 'Plein écran', onTap: () => _touche(plein)),
+              BoutonAction(icone: Icons.fullscreen_rounded, texte: 'Full screen', onTap: () => _touche(plein)),
               if (sousTitres != null)
-                BoutonAction(icone: Icons.subtitles_rounded, texte: 'Sous-titres', onTap: () => _touche(sousTitres))
+                BoutonAction(icone: Icons.subtitles_rounded, texte: 'Subtitles', onTap: () => _touche(sousTitres))
               else
-                BoutonAction(icone: Icons.skip_next_rounded, texte: 'Suivant', onTap: () => cx.cmd('NEXT')),
+                BoutonAction(icone: Icons.skip_next_rounded, texte: 'Next', onTap: () => cx.cmd('NEXT')),
             ],
           ),
         ],
@@ -147,13 +176,13 @@ class CartePcInutilise extends StatelessWidget {
               const Icon(Icons.bedtime_rounded, color: Couleurs.orange, size: 20),
               const SizedBox(width: 8),
               Expanded(
-                child: Text('PC inutilisé depuis ${duree(minutes)}',
+                child: Text('PC idle for ${duree(minutes)}',
                     style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
               ),
             ],
           ),
           const SizedBox(height: 6),
-          const Text("Personne n'a touché le clavier ni la souris. Tu veux l'éteindre ?",
+          const Text('Nobody has touched the keyboard or mouse. Shut it down?',
               style: TextStyle(color: Couleurs.doux, fontSize: 13)),
           const SizedBox(height: 12),
           GrilleBoutons(
@@ -162,20 +191,20 @@ class CartePcInutilise extends StatelessWidget {
             enfants: [
               BoutonAction(
                 icone: Icons.power_settings_new_rounded,
-                texte: 'Éteindre',
+                texte: 'Shut down',
                 couleur: Couleurs.rouge,
                 onTap: () async {
-                  final ok = await confirmer(context, 'Éteindre le PC ?',
-                      'Le PC s\'éteint dans 60 s (annulable depuis l\'app).',
-                      bouton: 'Éteindre', couleur: Couleurs.rouge);
+                  final ok = await confirmer(context, 'Shut down the PC?',
+                      'The PC shuts down in 60 s (you can cancel from the app).',
+                      bouton: 'Shut down', couleur: Couleurs.rouge);
                   if (ok) cx.cmd('ARRET');
                 },
               ),
               BoutonAction(
                   icone: Icons.desktop_access_disabled_rounded,
-                  texte: 'Écran noir',
+                  texte: 'Black screen',
                   onTap: () => cx.cmd('ECRAN_OFF')),
-              BoutonAction(icone: Icons.lock_rounded, texte: 'Verrouiller', onTap: () => cx.cmd('VERROU')),
+              BoutonAction(icone: Icons.lock_rounded, texte: 'Lock', onTap: () => cx.cmd('VERROU')),
             ],
           ),
         ],

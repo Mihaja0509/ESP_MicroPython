@@ -33,7 +33,7 @@ stat = {"cpu": -1, "ram": -1, "vol": -1, "bat": -1, "chg": 0}
 gpu = {"temp": -1, "charge": -1, "vram": -1}
 perf = {"cpu_temp": -1, "fps": -1, "total": -1}   # total : minutes passées sur le jeu en cours
 evt = {"casque": "", "manette": 0, "verrou": 0, "jeu": "", "video": "", "video_titre": "",
-       "inactif": 0}
+       "inactif": 0, "video_pos": None}  # video_pos : (position s, durée s, lecture 0/1, ticks reçu)
 etat = {"connecte": False, "stat": stat, "gpu": gpu, "perf": perf, "evt": evt, "meteo": [],
         "eteint": True,        # écran noir : PC éteint (ou carte qui vient de démarrer sans PC)
         "arret_fin": None,     # ticks de la fin du compte à rebours d'arrêt (None = pas d'arrêt)
@@ -107,7 +107,7 @@ def lire_ligne():
     return None
 
 
-TOUCHES_LISIBLES = {"win": "Win", "ctrl": "Ctrl", "alt": "Alt", "shift": "Maj"}
+TOUCHES_LISIBLES = {"win": "Win", "ctrl": "Ctrl", "alt": "Alt", "shift": "Shift"}
 
 
 def joli_raccourci(texte):
@@ -119,10 +119,10 @@ def joli_raccourci(texte):
 
 
 REACTIONS_MEDIA = {
-    "VOL+": ("son", "Volume +"), "VOL-": ("son", "Volume -"), "MUTE": ("muet", "Muet"),
-    "PLAY": ("musique", "Lecture / pause"), "NEXT": ("musique", "Suivant"),
-    "PREV": ("musique", "Précédent"), "LUM+": ("soleil", "Luminosité +"),
-    "LUM-": ("soleil", "Luminosité -"),
+    "VOL+": ("son", "Volume +"), "VOL-": ("son", "Volume -"), "MUTE": ("muet", "Mute"),
+    "PLAY": ("musique", "Play / pause"), "NEXT": ("musique", "Next"),
+    "PREV": ("musique", "Previous"), "LUM+": ("soleil", "Brightness +"),
+    "LUM-": ("soleil", "Brightness -"),
 }
 
 
@@ -134,23 +134,23 @@ def reaction_action(arg):
     if nom == "APP":
         ui.reagir("appli", majuscule(reste) or "Application")
     elif nom == "RAC":
-        ui.reagir("clavier", majuscule(reste) or "Raccourci")
+        ui.reagir("clavier", majuscule(reste) or "Shortcut")
     elif nom == "TOUCHES":
-        ui.reagir("clavier", joli_raccourci(reste) if reste else "Touches")
+        ui.reagir("clavier", joli_raccourci(reste) if reste else "Keys")
     elif nom in ("LUM", "LUM+", "LUM-"):
-        ui.reagir("soleil", "Luminosité %s %%" % reste if reste else "Luminosité")
+        ui.reagir("soleil", "Brightness %s %%" % reste if reste else "Brightness")
     elif nom == "VERROU":
-        ui.reagir("cadenas", "Verrouillage")
+        ui.reagir("cadenas", "PC locked")
     elif nom == "ECRAN_OFF":
-        ui.reagir("lune", "Écran du PC noir")
+        ui.reagir("lune", "PC screen off")
     elif nom == "ECRAN_ON":
-        ui.reagir("soleil", "Écran du PC rallumé")
+        ui.reagir("soleil", "PC screen on")
     elif nom == "VEILLE":
-        ui.reagir("lune", "Mise en veille")
+        ui.reagir("lune", "Going to sleep")
     elif nom in ("ARRET", "ANNULER"):
         pass  # le compte à rebours (EVT ARRET n) s'en charge
     elif nom == "TEXTE":
-        ui.reagir("clavier", "Texte envoyé")
+        ui.reagir("clavier", "Text sent")
     elif nom == "VOL":
         ui.reagir("son", "Volume %s %%" % reste)
     else:
@@ -250,13 +250,13 @@ def executer(ligne):
             ancien = evt["casque"]
             evt["casque"] = "" if val in ("", "-") else val
             if evt["casque"] and not ancien:
-                ui.reagir("son", "Casque connecté")
+                ui.reagir("son", "Headset on")
             elif ancien and not evt["casque"]:
-                ui.reagir("son", "Casque retiré")
+                ui.reagir("son", "Headset off")
         elif typ == "MANETTE":
             nouveau = 1 if val == "1" else 0
             if nouveau and not evt["manette"]:
-                ui.reagir("manette", "Manette connectée")
+                ui.reagir("manette", "Gamepad connected")
             evt["manette"] = nouveau
         elif typ == "VERROU":
             evt["verrou"] = 1 if val == "1" else 0
@@ -271,7 +271,14 @@ def executer(ligne):
                 evt["video"], evt["video_titre"] = "", ""
             else:
                 source, _, titre = val.partition("|")
-                evt["video"], evt["video_titre"] = source.strip() or "Vidéo", titre.strip()
+                evt["video"], evt["video_titre"] = source.strip() or "Video", titre.strip()
+        elif typ == "VIDEO_POS":
+            # EVT VIDEO_POS position durée lecture (secondes ; lecture 1 / pause 0) ; - = inconnue
+            try:
+                p = [int(x) for x in val.split()]
+                evt["video_pos"] = (p[0], p[1], p[2], time.ticks_ms())
+            except (ValueError, IndexError):
+                evt["video_pos"] = None
         elif typ == "INACTIF":
             # EVT INACTIF n : PC allumé sans clavier ni souris depuis n minutes (0 = utilisé)
             try:
@@ -281,7 +288,7 @@ def executer(ligne):
         elif typ == "ACTION":
             reaction_action(val)
         elif typ == "PIN":
-            ui.reagir("coucou", "Code : %s" % val, duree=60000)
+            ui.reagir("coucou", "Code: %s" % val, duree=60000)
         elif typ == "ARRET":
             # EVT ARRET 60 : le PC s'éteint dans 60 s ; 0 : arrêt annulé ; -1 : il s'éteint maintenant
             try:
@@ -291,7 +298,7 @@ def executer(ligne):
             maintenant = time.ticks_ms()
             if n == 0:
                 if etat["arret_fin"] is not None:
-                    ui.reagir("power", "Arrêt annulé")
+                    ui.reagir("power", "Cancelled")
                 etat["arret_fin"] = None
             elif n > 0:
                 etat["arret_total"] = n * 1000
@@ -300,9 +307,9 @@ def executer(ligne):
                 etat["arret_fin"] = maintenant
         elif typ == "APP":
             if val == "1":
-                ui.reagir("coucou", "Téléphone connecté")
+                ui.reagir("coucou", "Phone connected")
             else:
-                ui.reagir("power", "Téléphone déconnecté")
+                ui.reagir("power", "Phone disconnected")
         else:
             return "ERR evenement inconnu : " + typ
         return "OK"
@@ -328,7 +335,7 @@ def executer(ligne):
         return "OK"
     if cmd == "TEXT":
         ignores = pc.taper(arg)
-        ui.reagir("clavier", "Texte envoyé")
+        ui.reagir("clavier", "Text sent")
         return "OK" if ignores == 0 else "OK (%d caracteres ignores)" % ignores
     if cmd in MEDIA:
         pc.media(cmd)
@@ -340,22 +347,22 @@ def executer(ligne):
         except ValueError:
             return "ERR utilise : MOUSE dx dy"
         pc.souris(dx, dy)
-        ui.reagir("souris", "Souris", bandeau=False)
+        ui.reagir("souris", "Mouse", bandeau=False)
         return "OK"
     if cmd == "CLIC":
         pc.clic(1)
-        ui.reagir("souris", "Clic", bandeau=False)
+        ui.reagir("souris", "Click", bandeau=False)
         return "OK"
     if cmd == "CLICD":
         pc.clic(2)
-        ui.reagir("souris", "Clic droit", bandeau=False)
+        ui.reagir("souris", "Right click", bandeau=False)
         return "OK"
     if cmd == "MOLETTE":
         try:
             pc.souris(molette=int(arg))
         except ValueError:
             return "ERR utilise : MOLETTE n"
-        ui.reagir("souris", "Défilement", bandeau=False)
+        ui.reagir("souris", "Scroll", bandeau=False)
         return "OK"
     return "ERR commande inconnue : " + cmd
 

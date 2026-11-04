@@ -133,7 +133,7 @@ class ServeurApp:
         if morceaux.path not in ("/widget", "/etat_court"):
             return None
         if not self.token_valide(requete.headers.get("X-Token", "")):
-            return connexion.respond(HTTPStatus.UNAUTHORIZED, "Non autorisé\n")
+            return connexion.respond(HTTPStatus.UNAUTHORIZED, "Unauthorized\n")
         if morceaux.path == "/etat_court":
             try:
                 court = self.r["etat_court"]()
@@ -142,12 +142,12 @@ class ServeurApp:
             return connexion.respond(HTTPStatus.OK, json.dumps(court, ensure_ascii=False))
         ligne = (urllib.parse.parse_qs(morceaux.query).get("ligne") or [""])[0].strip()[:200]
         if not ligne:
-            return connexion.respond(HTTPStatus.BAD_REQUEST, "Commande vide\n")
+            return connexion.respond(HTTPStatus.BAD_REQUEST, "Empty command\n")
         boucle = asyncio.get_running_loop()
         try:
             texte = await boucle.run_in_executor(None, self.r["executer"], ligne)
         except Exception as e:
-            texte = f"Erreur : {e}"
+            texte = f"Error: {e}"
         return connexion.respond(HTTPStatus.OK, (texte or "OK") + "\n")
 
     async def _apercu(self, ws, m, etat):
@@ -196,11 +196,11 @@ class ServeurApp:
                         await self._envoyer(ws, {"type": "pin_affiche"})
                         continue
                     elif typ == "pin" and self.verifier_pin(m.get("pin", "")):
-                        token = self._ajouter(str(m.get("nom") or "Téléphone"))
+                        token = self._ajouter(str(m.get("nom") or "Phone"))
                         await self._envoyer(ws, {"type": "auth_ok", "token": token})
                         authentifie = True
                     else:
-                        await self._envoyer(ws, {"type": "erreur", "texte": "Non autorisé"})
+                        await self._envoyer(ws, {"type": "erreur", "texte": "Unauthorized"})
                         continue
                     if authentifie:
                         if typ == "auth":
@@ -264,6 +264,12 @@ class ServeurApp:
                         ok, texte = await boucle.run_in_executor(None, self.r["pas_un_jeu"])
                     await self._envoyer(ws, {"type": "rep", "ligne": typ, "texte": texte, "ok": ok})
                     await self._envoyer(ws, {"type": "jeux", **self.r["jeux"]()})
+                elif typ == "sites":
+                    await self._envoyer(ws, {"type": "sites", **self.r["sites"]()})
+                elif typ == "sites_maj":
+                    ok, texte = await boucle.run_in_executor(None, self.r["sites_maj"], m.get("sites"))
+                    await self._envoyer(ws, {"type": "rep", "ligne": typ, "texte": texte, "ok": ok})
+                    await self._envoyer(ws, {"type": "sites", **self.r["sites"]()})
                 elif typ == "pointeur":
                     await boucle.run_in_executor(
                         None, self.r["pointeur"], int(m.get("ecran", 0)), float(m.get("x", 0)),

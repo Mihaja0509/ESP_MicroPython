@@ -21,7 +21,7 @@ class EcranApercu extends StatefulWidget {
 
 class _EcranApercuState extends State<EcranApercu> {
   // (largeur de l'image, qualité JPEG, pause minimale entre deux images en ms, nom)
-  static const _reglages = [(640, 45, 250, 'Éco'), (960, 60, 150, 'Normal'), (1440, 72, 150, 'HD')];
+  static const _reglages = [(640, 45, 250, 'Eco'), (960, 60, 150, 'Normal'), (1440, 72, 150, 'HD')];
 
   int _ecran = 0;
   int _qualite = 1;
@@ -130,10 +130,10 @@ class _EcranApercuState extends State<EcranApercu> {
               const SizedBox(height: 10),
               Onglets(
                 onglets: const [
-                  (Icons.visibility_rounded, 'Voir'),
-                  (Icons.touch_app_rounded, 'Clic'),
+                  (Icons.visibility_rounded, 'View'),
+                  (Icons.touch_app_rounded, 'Click'),
                   (Icons.ads_click_rounded, 'Double'),
-                  (Icons.mouse_rounded, 'Droit'),
+                  (Icons.mouse_rounded, 'Right'),
                 ],
                 choisi: _mode,
                 onChange: (i) => setState(() => _mode = i),
@@ -141,8 +141,8 @@ class _EcranApercuState extends State<EcranApercu> {
               const SizedBox(height: 6),
               Text(
                 _mode == 0
-                    ? 'Toucher l\'image ne clique pas. Pince pour zoomer.'
-                    : 'Touche l\'image pour cliquer à cet endroit. Appui long = clic droit. Pince pour zoomer.',
+                    ? 'Touching the image does not click. Pinch to zoom.'
+                    : 'Touch the image to click there. Long press = right click. Pinch to zoom.',
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 textAlign: TextAlign.center,
@@ -163,8 +163,8 @@ class _EcranApercuState extends State<EcranApercu> {
         Expanded(
           child: Text(
             _enPause
-                ? 'Écran du PC (en pause)'
-                : 'Écran du PC  ${_ips > 0 ? '${_ips.toStringAsFixed(1)} img/s' : ''}',
+                ? 'PC screen (paused)'
+                : 'PC screen  ${_ips > 0 ? '${_ips.toStringAsFixed(1)} fps' : ''}',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontWeight: FontWeight.w700),
@@ -181,7 +181,7 @@ class _EcranApercuState extends State<EcranApercu> {
             label: Text('${_ecran + 1}/$ecrans'),
           ),
         PopupMenuButton<int>(
-          tooltip: 'Qualité',
+          tooltip: 'Quality',
           initialValue: _qualite,
           icon: const Icon(Icons.high_quality_rounded, color: Couleurs.gris),
           onSelected: (i) => setState(() => _qualite = i),
@@ -191,7 +191,7 @@ class _EcranApercuState extends State<EcranApercu> {
           ],
         ),
         IconButton(
-          tooltip: _enPause ? 'Reprendre' : 'Pause',
+          tooltip: _enPause ? 'Resume' : 'Pause',
           icon: Icon(_enPause ? Icons.play_arrow_rounded : Icons.pause_rounded, color: Couleurs.gris),
           onPressed: () => setState(() {
             _enPause = !_enPause;
@@ -220,7 +220,7 @@ class _EcranApercuState extends State<EcranApercu> {
     return Carte(
       padding: const EdgeInsets.all(6),
       child: !cx.connecte
-          ? _message(Icons.wifi_off_rounded, 'PC non connecté.')
+          ? _message(Icons.wifi_off_rounded, 'PC not connected.')
           : erreur != null
               ? _message(Icons.error_outline_rounded, erreur)
               : ValueListenableBuilder<Uint8List?>(
@@ -276,8 +276,8 @@ class _EcranApercuState extends State<EcranApercu> {
                                 ),
                                 child: Text(
                                   verrou
-                                      ? 'PC verrouillé : l\'image peut rester noire'
-                                      : 'Écran noir actif : tu vois quand même le PC ici',
+                                      ? 'PC locked: the image may stay black'
+                                      : 'Black screen on: you still see the PC here',
                                   maxLines: 2,
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(fontSize: 12, color: Couleurs.orange),

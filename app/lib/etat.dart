@@ -27,7 +27,7 @@ class JourMeteo {
       );
 
   String get textePluie =>
-      (pluie >= 20 && heure >= 0) ? 'Pluie $pluie % vers $heure h' : 'Pas de pluie prévue';
+      (pluie >= 20 && heure >= 0) ? 'Rain $pluie % around $heure:00' : 'No rain expected';
 }
 
 class EtatPC {
@@ -59,6 +59,9 @@ class EtatPC {
   final int jeuTotal; // minutes passées en tout sur le jeu en cours, -1 = inconnu
   final int masterV; // change quand les données du master changent sur le PC
   final bool masterActif; // appli de recherche au premier plan depuis 2 min
+  final int videoPos; // secondes depuis le début de la vidéo, -1 = inconnue (Phase 11-bis)
+  final int videoDuree; // durée de la vidéo en secondes, -1 = inconnue
+  final bool videoLecture; // true = en lecture, false = en pause
 
   const EtatPC({
     required this.recu,
@@ -89,6 +92,9 @@ class EtatPC {
     this.jeuTotal = -1,
     this.masterV = 0,
     this.masterActif = false,
+    this.videoPos = -1,
+    this.videoDuree = -1,
+    this.videoLecture = false,
   });
 
   factory EtatPC.vide() => const EtatPC(
@@ -149,6 +155,9 @@ class EtatPC {
       jeuTotal: _entier(m['jeu_total']),
       masterV: m['master_v'] is num ? (m['master_v'] as num).toInt() : 0,
       masterActif: m['master_actif'] == true,
+      videoPos: _entier(m['video_pos']),
+      videoDuree: _entier(m['video_duree']),
+      videoLecture: m['video_lecture'] == true,
     );
   }
 

@@ -220,7 +220,7 @@ class GrilleBoutons extends StatelessWidget {
 
 /// Fenêtre « Es-tu sûr ? ». Renvoie true si l'utilisateur confirme.
 Future<bool> confirmer(BuildContext context, String titre, String texte,
-    {String bouton = 'Confirmer', Color? couleur}) async {
+    {String bouton = 'Confirm', Color? couleur}) async {
   final ok = await showDialog<bool>(
     context: context,
     builder: (context) => AlertDialog(
@@ -228,7 +228,7 @@ Future<bool> confirmer(BuildContext context, String titre, String texte,
       title: Text(titre),
       content: SingleChildScrollView(child: Text(texte)),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Annuler')),
+        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
         FilledButton(
           style: couleur == null ? null : FilledButton.styleFrom(backgroundColor: couleur),
           onPressed: () => Navigator.pop(context, true),

@@ -22,8 +22,8 @@ import zipfile
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-PHASES = ("Etat de l'art", "Prototype", "Mesures", "Redaction")
-MOIS = ("janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc.")
+PHASES = ("Literature review", "Prototype", "Measurements", "Writing")
+MOIS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 # caractères que les polices de l'ESP32 savent dessiner (les autres sont simplifiés)
 CARACTERES_ECRAN = set(chr(c) for c in range(32, 127)) | set("°éèêëàâäçîïôöùûüÉÈÀÇ…•")
 NAVIGATEURS = {"chrome.exe", "msedge.exe", "firefox.exe", "opera.exe", "opera_gx.exe", "brave.exe",
@@ -41,7 +41,7 @@ DEFAUT = {
     "objectif": {"texte": "", "date": "", "fait": False},
     "objectifs_passes": [],              # 20 derniers objectifs
     "reunion": {"date": "", "question": ""},   # date : "2026-11-10T10:00"
-    "phase": "Etat de l'art",
+    "phase": "Literature review",
     "objectif_articles": 20,
     "objectif_mots_jour": 300,
     "chemins": {"memoire": "", "a_lire": "", "lus": "", "resultats": ""},
@@ -133,6 +133,9 @@ class SuiviMaster:
         self.fichier_hist = Path(dossier) / "master_historique.json"
         self.verrou = threading.Lock()
         self.config = self._lire(self.fichier, DEFAUT)
+        # Phase 11-bis : ancienne phase enregistrée en français -> anglais
+        self.config["phase"] = {"Etat de l'art": "Literature review", "Mesures": "Measurements",
+                                "Redaction": "Writing"}.get(self.config["phase"], self.config["phase"])
         self.hist = self._lire(self.fichier_hist, {"mots_base": {}, "dernier_mots": -1, "temps": {},
                                                      "notifie": {}})
         self.auto = {"mots": -1, "mots_jour": -1, "lus": -1, "a_lire": -1, "a_lire_noms": [],
@@ -176,7 +179,7 @@ class SuiviMaster:
     def maj(self, d):
         """Change une partie des réglages (message « master_maj » de l'app). -> (ok, texte)."""
         if not isinstance(d, dict):
-            return False, "Données invalides"
+            return False, "Invalid data"
         with self.verrou:
             c = self.config
             if "echeances" in d:
@@ -193,23 +196,23 @@ class SuiviMaster:
                     c["objectifs_passes"] = ([dict(ancien)] + c["objectifs_passes"])[:20]
                 fait = bool(o.get("fait", False)) and bool(texte)
                 if fait and not ancien.get("fait"):
-                    self._evenements.append(("livre", "Objectif du jour atteint. Bien joué."))
+                    self._evenements.append(("livre", "Daily goal done. Nice!"))
                 c["objectif"] = {"texte": texte, "date": date.today().isoformat() if texte else "",
                                  "fait": fait}
             if "reunion" in d and isinstance(d["reunion"], dict):
                 r = d["reunion"]
                 quand = str(r.get("date", "")).strip()
                 if quand and not _date_heure(quand):
-                    return False, "Date de réunion invalide"
+                    return False, "Invalid meeting date"
                 c["reunion"] = {"date": quand[:16], "question": str(r.get("question", "")).strip()[:120]}
             if "phase" in d:
-                c["phase"] = str(d["phase"]).strip()[:30] or "Etat de l'art"
+                c["phase"] = str(d["phase"]).strip()[:30] or "Literature review"
             for cle, maxi in (("objectif_articles", 500), ("objectif_mots_jour", 5000)):
                 if cle in d:
                     try:
                         c[cle] = max(0, min(maxi, int(d[cle])))
                     except (TypeError, ValueError):
-                        return False, "Nombre invalide"
+                        return False, "Invalid number"
             if "chemins" in d and isinstance(d["chemins"], dict):
                 for cle in ("memoire", "a_lire", "lus", "resultats"):
                     if cle in d["chemins"]:
@@ -220,7 +223,7 @@ class SuiviMaster:
             self._ecrire(self.fichier, c)
             self._dernier_calcul = 0.0   # recalcule tout de suite (chemins changés…)
             self.version += 1
-        return True, "Master mis à jour"
+        return True, "Master updated"
 
     def pour_app(self):
         """Tout ce que l'onglet Master de l'app affiche."""
@@ -296,7 +299,7 @@ class SuiviMaster:
             try:
                 mots = self._cache("memoire", c["memoire"], mots_docx)
             except (OSError, KeyError, zipfile.BadZipFile) as e:
-                mots, a["probleme"] = None, f"Mémoire illisible : {e}"
+                mots, a["probleme"] = None, f"Thesis unreadable: {e}"
             if mots is not None:
                 with self.verrou:
                     base = self.hist["mots_base"]
@@ -309,7 +312,7 @@ class SuiviMaster:
                     a["mots"], a["mots_jour"] = mots, max(0, mots - base[jour])
                 but = self.config["objectif_mots_jour"]
                 if but and a["mots_jour"] >= but and self._une_fois(f"mots:{jour}"):
-                    self._evenements.append(("stylo", "Objectif de mots atteint !"))
+                    self._evenements.append(("stylo", "Word goal reached!"))
         else:
             a["mots"], a["mots_jour"] = -1, -1
         # articles
@@ -321,7 +324,7 @@ class SuiviMaster:
             try:
                 sessions = self._cache("resultats", c["resultats"], lire_resultats) or []
             except (OSError, csv.Error, UnicodeDecodeError) as e:
-                sessions, a["probleme"] = [], f"CSV illisible : {e}"
+                sessions, a["probleme"] = [], f"CSV unreadable: {e}"
             if sessions:
                 s, lat, derniere = sessions[-1]
                 a["resultat"] = {"session": s, "mediane": round(mediane(lat)), "p95": round(p95(lat)),
@@ -330,15 +333,15 @@ class SuiviMaster:
                 a["courbe"] = [round(mediane(v)) for _, v, _ in sessions[-10:]]
                 cle = (s, len(lat))
                 if self._derniere_session is not None and cle != self._derniere_session:
-                    self._evenements.append(("graphe", "Nouveau résultat : %d ms" % a["resultat"]["mediane"]))
+                    self._evenements.append(("graphe", "New result: %d ms" % a["resultat"]["mediane"]))
                 self._derniere_session = cle
         # réunion dans 1 h, échéance à J-3
         r = _date_heure(self.config["reunion"].get("date"))
         if r and 0 < (r - datetime.now()).total_seconds() <= 3600 and self._une_fois(f"reunion:{r}"):
-            self._evenements.append(("calendrier", "Réunion dans 1 h : notes prêtes ?"))
+            self._evenements.append(("calendrier", "Meeting in 1h: notes?"))
         e = self.prochaine_echeance()
         if e and e[0] == 3 and self._une_fois(f"j3:{e[1]}:{jour}"):
-            self._evenements.append(("calendrier", "J-3 : %s" % e[1]))
+            self._evenements.append(("calendrier", "D-3: %s" % e[1]))
         with self.verrou:
             if a != self.auto:
                 self.auto = a

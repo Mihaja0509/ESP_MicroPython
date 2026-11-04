@@ -91,8 +91,8 @@ class _CarteWidgetAndroidState extends State<CarteWidgetAndroid> with WidgetsBin
     setState(() => _demande = true);
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(ok
-          ? 'Confirme dans la fenêtre du téléphone (« Ajouter »)'
-          : "Ce téléphone refuse l'ajout direct : suis l'aide ci-dessous"),
+          ? 'Confirm in the phone window ("Add")'
+          : 'This phone refuses direct adding: follow the help below'),
     ));
     Future.delayed(const Duration(seconds: 3), _compter);
   }
@@ -102,9 +102,9 @@ class _CarteWidgetAndroidState extends State<CarteWidgetAndroid> with WidgetsBin
     final favoris = favorisResolus(widget.cx).length;
     final String statut;
     if (_poses > 0) {
-      statut = _poses == 1 ? 'Widget posé sur l\'écran d\'accueil' : '$_poses widgets posés';
+      statut = _poses == 1 ? 'Widget placed on the home screen' : '$_poses widgets placed';
     } else if (_poses == 0) {
-      statut = 'Aucun widget posé pour l\'instant';
+      statut = 'No widget placed yet';
     } else {
       statut = '';
     }
@@ -112,11 +112,11 @@ class _CarteWidgetAndroidState extends State<CarteWidgetAndroid> with WidgetsBin
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Titre("Widget de l'écran d'accueil", icone: Icons.widgets_rounded),
+          const Titre('Home screen widget', icone: Icons.widgets_rounded),
           Text(
             favoris == 0
-                ? "Ajoute d'abord des favoris (Contrôles, appui long sur un bouton)."
-                : 'Il affichera tes ${favoris < boutonsWidget ? favoris : boutonsWidget} premiers favoris.',
+                ? 'Add favorites first (Controls, long-press a button).'
+                : 'It will show your first ${favoris < boutonsWidget ? favoris : boutonsWidget} favorites.',
             style: const TextStyle(color: Couleurs.doux),
           ),
           if (statut.isNotEmpty) ...[
@@ -126,18 +126,18 @@ class _CarteWidgetAndroidState extends State<CarteWidgetAndroid> with WidgetsBin
           const SizedBox(height: 10),
           FilledButton.icon(
             icon: const Icon(Icons.add_to_home_screen_rounded),
-            label: const Text("Ajouter le widget à l'écran d'accueil"),
+            label: const Text('Add the widget to the home screen'),
             onPressed: _poser,
           ),
           if (_demande && _poses <= 0) ...[
             const SizedBox(height: 10),
             const Text(
-              "Rien ne s'est affiché ? Sur Xiaomi :\n"
-              '1. Paramètres → Applications → Gérer les applications → Dadou → '
-              'Autres autorisations → « Raccourcis de l\'écran d\'accueil » → Autoriser, '
-              'puis appuie de nouveau sur le bouton.\n'
-              '2. Ou à la main : appui long sur un espace vide de l\'écran d\'accueil → '
-              'Widgets → cherche « Dadou » → fais glisser le widget.',
+              'Nothing showed up? On Xiaomi:\n'
+              '1. Settings → Apps → Manage apps → Dadou → '
+              'Other permissions → "Home screen shortcuts" → Allow, '
+              'then tap the button again.\n'
+              '2. Or by hand: long-press an empty spot on the home screen → '
+              'Widgets → search "Dadou" → drag the widget.',
               style: TextStyle(color: Couleurs.gris, height: 1.45),
             ),
           ],

@@ -28,7 +28,7 @@
         android:ellipsize="end"
         android:paddingStart="4dp"
         android:paddingEnd="4dp"
-        android:text="Ajoute des favoris dans Dadou (Contrôles, appui long)"
+        android:text="Add favorites in Dadou (Controls, long press)"
         android:textColor="#C8C8EB"
         android:textSize="12sp"
         android:visibility="gone" />

@@ -39,7 +39,7 @@ class DadouWidget : AppWidgetProvider() {
         val token = prefs.getString("flutter.token", "") ?: ""
         val appli = context.applicationContext
         if (adresse.isEmpty() || token.isEmpty()) {
-            Toast.makeText(appli, "Ouvre Dadou pour te connecter au PC", Toast.LENGTH_SHORT).show()
+            Toast.makeText(appli, "Open Dadou to connect to the PC", Toast.LENGTH_SHORT).show()
             return
         }
         val attente = goAsync()
@@ -47,7 +47,7 @@ class DadouWidget : AppWidgetProvider() {
             val texte = try {
                 envoyer(adresse, token, ligne)
             } catch (e: Exception) {
-                "PC injoignable (éteint, en veille ou Tailscale coupé ?)"
+                "PC unreachable (off, asleep or Tailscale down?)"
             }
             Handler(Looper.getMainLooper()).post {
                 Toast.makeText(appli, texte, Toast.LENGTH_SHORT).show()
@@ -151,7 +151,7 @@ class DadouWidget : AppWidgetProvider() {
             c.setRequestProperty("X-Token", token)
             try {
                 val code = c.responseCode
-                if (code == 401) return "Ce téléphone n'est plus appairé : ouvre Dadou"
+                if (code == 401) return "This phone is no longer paired: open Dadou"
                 val flux = if (code < 400) c.inputStream else c.errorStream
                 val texte = flux?.bufferedReader()?.use { it.readText() }?.trim() ?: ""
                 return texte.ifEmpty { "OK" }

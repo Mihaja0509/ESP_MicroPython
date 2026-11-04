@@ -64,7 +64,7 @@ class _EcranControlesState extends State<EcranControles> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Titre('Son  ${volume.round()} %', icone: Icons.volume_up_rounded),
+          Titre('Sound  ${volume.round()} %', icone: Icons.volume_up_rounded),
           Slider(
             value: volume.clamp(0.0, 100.0).toDouble(),
             max: 100,
@@ -97,7 +97,7 @@ class _EcranControlesState extends State<EcranControles> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Titre('Luminosité', icone: Icons.light_mode_rounded),
+          const Titre('Brightness', icone: Icons.light_mode_rounded),
           _ligneReglage(
             'PC',
             _luminosite,
@@ -117,7 +117,7 @@ class _EcranControlesState extends State<EcranControles> {
               });
             },
             fin: IconButton(
-              tooltip: e.ecranEsp ? 'Éteindre l\'écran de l\'ESP32' : 'Allumer l\'écran de l\'ESP32',
+              tooltip: e.ecranEsp ? 'Turn off the ESP32 screen' : 'Turn on the ESP32 screen',
               icon: Icon(e.ecranEsp ? Icons.lightbulb_rounded : Icons.lightbulb_outline_rounded,
                   color: e.ecranEsp ? Couleurs.orange : Couleurs.gris),
               onPressed: () => _envoyer(e.ecranEsp ? 'ECRAN_ESP 0' : 'ECRAN_ESP 1'),
@@ -170,7 +170,7 @@ class _EcranControlesState extends State<EcranControles> {
         children: [
           Onglets(
             onglets: [
-              (Icons.bolt_rounded, 'Raccourcis'),
+              (Icons.bolt_rounded, 'Shortcuts'),
               (Icons.apps_rounded, 'Apps'),
               (Icons.power_settings_new_rounded, 'PC'),
             ],
@@ -200,7 +200,7 @@ class _EcranControlesState extends State<EcranControles> {
                     onChanged: (_) => setState(() {}),
                     decoration: InputDecoration(
                       isDense: true,
-                      hintText: 'Rechercher',
+                      hintText: 'Search',
                       prefixIcon: const Icon(Icons.search_rounded, size: 20),
                       suffixIcon: _recherche.text.isEmpty
                           ? null
@@ -212,7 +212,7 @@ class _EcranControlesState extends State<EcranControles> {
                     ),
                   )
                 : Text(
-                    'Appui long : favori, modifier, supprimer',
+                    'Long press: favorite, edit, delete',
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(color: Couleurs.gris, fontSize: 12),
@@ -251,14 +251,14 @@ class _EcranControlesState extends State<EcranControles> {
       children: [
         _barre(
           nombre: cx.raccourcis.length,
-          texteAjout: 'Nouveau raccourci',
+          texteAjout: 'New shortcut',
           ajouter: cx.connecte ? () => _editerRaccourci(null) : null,
         ),
         if (cx.raccourcis.isEmpty)
-          _vide('Aucun raccourci. Touche + pour en créer un : touches (ex. Ctrl + 6), '
-              'commande administrateur, texte, app… en un seul appui.')
+          _vide('No shortcuts. Tap + to create one: keys (e.g. Ctrl + 6), '
+              'admin command, text, app… in a single tap.')
         else if (liste.isEmpty)
-          _vide('Aucun résultat.')
+          _vide('No results.')
         else
           _grille([
             for (final r in liste)
@@ -276,8 +276,8 @@ class _EcranControlesState extends State<EcranControles> {
   }
 
   Future<void> _supprimerRaccourci(Raccourci r) async {
-    final ok = await confirmer(context, 'Supprimer « ${r.nom} » ?', 'Le raccourci disparaîtra du PC.',
-        bouton: 'Supprimer', couleur: Couleurs.rouge);
+    final ok = await confirmer(context, 'Delete "${r.nom}"?', 'The shortcut will be removed from the PC.',
+        bouton: 'Delete', couleur: Couleurs.rouge);
     if (ok) await cx.retirerRaccourci(r.nom);
   }
 
@@ -287,11 +287,11 @@ class _EcranControlesState extends State<EcranControles> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _barre(nombre: cx.apps.length, texteAjout: 'Ajouter une app', ajouter: cx.connecte ? () => _editerApp(null) : null),
+        _barre(nombre: cx.apps.length, texteAjout: 'Add an app', ajouter: cx.connecte ? () => _editerApp(null) : null),
         if (cx.apps.isEmpty)
-          _vide('Aucune app pour l\'instant. Touche + pour ajouter un lien web ou un programme du PC.')
+          _vide('No apps yet. Tap + to add a web link or a PC program.')
         else if (liste.isEmpty)
-          _vide('Aucun résultat.')
+          _vide('No results.')
         else
           _grille([
             for (final a in liste)
@@ -312,9 +312,9 @@ class _EcranControlesState extends State<EcranControles> {
   }
 
   Future<void> _supprimerApp(AppPc app) async {
-    final ok = await confirmer(context, 'Retirer « ${app.nom} » ?',
-        app.cible.isEmpty ? 'L\'app disparaîtra de la liste.' : app.cible,
-        bouton: 'Retirer', couleur: Couleurs.rouge);
+    final ok = await confirmer(context, 'Remove "${app.nom}"?',
+        app.cible.isEmpty ? 'The app will be removed from the list.' : app.cible,
+        bouton: 'Remove', couleur: Couleurs.rouge);
     if (ok) {
       HapticFeedback.selectionClick();
       await cx.retirerApp(app.nom);
@@ -333,7 +333,7 @@ class _EcranControlesState extends State<EcranControles> {
           ),
         const Padding(
           padding: EdgeInsets.only(bottom: 10),
-          child: Text('Appui long : ajouter aux favoris (Accueil et widget).',
+          child: Text('Long press: add to favorites (Home and widget).',
               style: TextStyle(color: Couleurs.gris, fontSize: 12)),
         ),
         _grille([
@@ -341,7 +341,7 @@ class _EcranControlesState extends State<EcranControles> {
             if (a.id == 'cmd:ECRAN_BASCULE')
               _tuile(ActionDadou(
                 id: a.id,
-                nom: e.ecranNoir ? 'Rallumer l\'écran' : 'Écran noir',
+                nom: e.ecranNoir ? 'Wake the screen' : 'Black screen',
                 icone: e.ecranNoir ? Icons.desktop_windows_rounded : a.icone,
                 ligne: a.ligne,
                 code: a.code,
@@ -390,20 +390,20 @@ class _EcranControlesState extends State<EcranControles> {
             const Divider(height: 1),
             ListTile(
               leading: Icon(favori ? Icons.star_outline_rounded : Icons.star_rounded, color: Couleurs.orange),
-              title: Text(favori ? 'Retirer des favoris' : 'Ajouter aux favoris'),
-              subtitle: const Text('Accueil et widget du téléphone'),
+              title: Text(favori ? 'Remove from favorites' : 'Add to favorites'),
+              subtitle: const Text('Home and phone widget'),
               onTap: () => Navigator.pop(context, 'favori'),
             ),
             if (modifier != null)
               ListTile(
                 leading: const Icon(Icons.edit_rounded, color: Couleurs.cyan),
-                title: const Text('Modifier'),
+                title: const Text('Edit'),
                 onTap: () => Navigator.pop(context, 'modifier'),
               ),
             if (supprimer != null)
               ListTile(
                 leading: const Icon(Icons.delete_rounded, color: Couleurs.rouge),
-                title: const Text('Supprimer'),
+                title: const Text('Delete'),
                 onTap: () => Navigator.pop(context, 'supprimer'),
               ),
           ],
@@ -460,7 +460,7 @@ class BandeauArret extends StatelessWidget {
           const Icon(Icons.power_settings_new_rounded, color: Couleurs.rouge),
           const SizedBox(width: 10),
           Expanded(
-            child: Text('Arrêt du PC dans $secondes s',
+            child: Text('PC shutdown in $secondes s',
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(fontWeight: FontWeight.w700)),
@@ -469,7 +469,7 @@ class BandeauArret extends StatelessWidget {
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Couleurs.rouge),
             onPressed: onAnnuler,
-            child: const Text('Annuler'),
+            child: const Text('Cancel'),
           ),
         ],
       ),
@@ -517,17 +517,17 @@ class _DialogueAppState extends State<_DialogueApp> {
     }
     String? erreur;
     if (nom.isEmpty) {
-      erreur = 'Donne un nom à l\'app.';
+      erreur = 'Give the app a name.';
     } else if (nom.length > 30) {
-      erreur = 'Nom trop long (30 caractères max).';
+      erreur = 'Name too long (30 characters max).';
     } else if (cible.isEmpty) {
-      erreur = _sorte == 'web' ? 'Colle le lien web.' : 'Colle le chemin du fichier ou du programme.';
+      erreur = _sorte == 'web' ? 'Paste the web link.' : 'Paste the path of the file or program.';
     } else if (cible.contains('"')) {
-      erreur = 'Pas de guillemets dans le lien ou le chemin.';
+      erreur = 'No quotes in the link or path.';
     } else if (_sorte == 'chemin' && !RegExp(r'^([A-Za-z]:[\\/]|\\\\|%)').hasMatch(cible)) {
-      erreur = 'Un chemin Windows commence par une lettre de disque, ex. C:\\…';
+      erreur = 'A Windows path starts with a drive letter, e.g. C:\\…';
     } else if (_sorte == 'web' && (cible.contains(' ') || !cible.contains('.'))) {
-      erreur = 'Lien web invalide, ex. https://www.youtube.com';
+      erreur = 'Invalid web link, e.g. https://www.youtube.com';
     }
     if (erreur != null) {
       setState(() => _erreur = erreur);
@@ -542,14 +542,14 @@ class _DialogueAppState extends State<_DialogueApp> {
     final modification = widget.existante != null;
     return AlertDialog(
       backgroundColor: const Color(0xFF1A1438),
-      title: Text(modification ? 'Modifier l\'app' : 'Ajouter une app'),
+      title: Text(modification ? 'Edit the app' : 'Add an app'),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Onglets(
-              onglets: const [(Icons.public_rounded, 'Lien web'), (Icons.folder_open_rounded, 'Windows')],
+              onglets: const [(Icons.public_rounded, 'Web link'), (Icons.folder_open_rounded, 'Windows')],
               choisi: web ? 0 : 1,
               onChange: (i) => setState(() {
                 _sorte = i == 0 ? 'web' : 'chemin';
@@ -561,7 +561,7 @@ class _DialogueAppState extends State<_DialogueApp> {
               controller: _nom,
               textCapitalization: TextCapitalization.sentences,
               maxLength: 30,
-              decoration: const InputDecoration(labelText: 'Nom', hintText: 'ex. Netflix'),
+              decoration: const InputDecoration(labelText: 'Name', hintText: 'e.g. Netflix'),
             ),
             const SizedBox(height: 6),
             TextField(
@@ -569,12 +569,12 @@ class _DialogueAppState extends State<_DialogueApp> {
               autocorrect: false,
               keyboardType: web ? TextInputType.url : TextInputType.text,
               decoration: InputDecoration(
-                labelText: web ? 'Lien web' : 'Chemin Windows',
-                hintText: web ? 'https://www.netflix.com' : r'C:\Program Files\…\jeu.exe',
+                labelText: web ? 'Web link' : 'Windows path',
+                hintText: web ? 'https://www.netflix.com' : r'C:\Program Files\…\game.exe',
                 helperText: web
-                    ? 'S\'ouvre dans le navigateur du PC.'
-                    : 'Programme, fichier ou dossier. Astuce : clic droit sur le fichier '
-                        '→ « Copier en tant que chemin », puis colle-le ici.',
+                    ? 'Opens in the PC browser.'
+                    : 'Program, file or folder. Tip: right-click the file '
+                        '→ "Copy as path", then paste it here.',
                 helperMaxLines: 4,
               ),
               onSubmitted: (_) => _valider(),
@@ -588,8 +588,8 @@ class _DialogueAppState extends State<_DialogueApp> {
         ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Annuler')),
-        FilledButton(onPressed: _valider, child: Text(modification ? 'Enregistrer' : 'Ajouter')),
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(onPressed: _valider, child: Text(modification ? 'Save' : 'Add')),
       ],
     );
   }

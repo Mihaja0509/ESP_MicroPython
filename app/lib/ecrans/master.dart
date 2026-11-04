@@ -6,8 +6,8 @@ import 'package:flutter/material.dart';
 import '../connexion.dart';
 import '../theme.dart';
 
-const _jours = ['lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.', 'dim.'];
-const _mois = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
+const _jours = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const _mois = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const violet = Color(0xFF9670FF);
 
 /// « lun. 10 nov. »
@@ -18,7 +18,7 @@ String _deux(int n) => n.toString().padLeft(2, '0');
 String dateIso(DateTime d) => '${d.year}-${_deux(d.month)}-${_deux(d.day)}';
 
 /// 95 -> « 1 h 35 » ; 40 -> « 40 min »
-String duree(int minutes) => minutes < 60 ? '$minutes min' : '${minutes ~/ 60} h ${_deux(minutes % 60)}';
+String duree(int minutes) => minutes < 60 ? '$minutes min' : '${minutes ~/ 60}h ${_deux(minutes % 60)}';
 
 int _n(dynamic v, [int defaut = -1]) => v is num ? v.toInt() : defaut;
 
@@ -26,11 +26,11 @@ Map<String, dynamic> _carte(dynamic v) => v is Map ? Map<String, dynamic>.from(v
 
 /// Échéances proposées (devoirs du cours de méthodologie, matériel attendu).
 const suggestionsEcheances = [
-  'Assignment 2 : Reference Management',
-  'Assignment 3 : Paper Critique',
-  'Assignment 4 : Research Proposal',
-  'Arrivée de la Odin 3',
-  'Rapport au superviseur',
+  'Assignment 2: Reference Management',
+  'Assignment 3: Paper Critique',
+  'Assignment 4: Research Proposal',
+  'Odin 3 arrives',
+  'Report to the supervisor',
 ];
 
 class Echeance {
@@ -210,7 +210,7 @@ class _EcranMasterState extends State<EcranMaster> {
       return const Center(
         child: Padding(
           padding: EdgeInsets.all(24),
-          child: Text('Connecte-toi au PC pour suivre ton master.',
+          child: Text('Connect to the PC to follow your master.',
               textAlign: TextAlign.center, style: TextStyle(color: Couleurs.gris)),
         ),
       );
@@ -238,7 +238,7 @@ class _EcranMasterState extends State<EcranMaster> {
         const SizedBox(height: 14),
         OutlinedButton.icon(
           icon: const Icon(Icons.view_in_ar_rounded),
-          label: const Text("Afficher la scène master sur l'ESP32"),
+          label: const Text('Show the master scene on the ESP32'),
           onPressed: cx.afficherMaster,
         ),
       ],
@@ -255,14 +255,14 @@ class _EcranMasterState extends State<EcranMaster> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Titre('Échéances', icone: Icons.flag_rounded),
+          const Titre('Deadlines', icone: Icons.flag_rounded),
           if (p == null)
-            const Text('Aucune échéance à venir.', style: TextStyle(color: Couleurs.gris))
+            const Text('No upcoming deadline.', style: TextStyle(color: Couleurs.gris))
           else
             Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                Text(j == 0 ? "Aujourd'hui" : 'J-$j',
+                Text(j == 0 ? 'Today' : 'D-$j',
                     style: TextStyle(fontSize: j == 0 ? 26 : 40, fontWeight: FontWeight.w900, color: couleur)),
                 const SizedBox(width: 14),
                 Expanded(
@@ -284,7 +284,7 @@ class _EcranMasterState extends State<EcranMaster> {
             ListTile(
               dense: true,
               contentPadding: EdgeInsets.zero,
-              leading: Text('J-${e.joursRestants}',
+              leading: Text('D-${e.joursRestants}',
                   style: const TextStyle(fontWeight: FontWeight.w800, color: Couleurs.doux)),
               title: Text(e.titre, maxLines: 1, overflow: TextOverflow.ellipsis),
               subtitle: Text(dateCourte(e.date)),
@@ -298,14 +298,14 @@ class _EcranMasterState extends State<EcranMaster> {
             children: [
               FilledButton.icon(
                 icon: const Icon(Icons.add_rounded),
-                label: const Text('Ajouter'),
+                label: const Text('Add'),
                 onPressed: () => _ajouterEcheance(d),
               ),
               const SizedBox(width: 8),
               if (p != null)
                 TextButton(
                   onPressed: () => _retirerEcheance(d, p),
-                  child: const Text('Retirer la prochaine'),
+                  child: const Text('Remove the next one'),
                 ),
             ],
           ),
@@ -322,7 +322,7 @@ class _EcranMasterState extends State<EcranMaster> {
       builder: (context) => StatefulBuilder(
         builder: (context, setDialog) => AlertDialog(
           backgroundColor: const Color(0xFF1A1438),
-          title: const Text('Nouvelle échéance'),
+          title: const Text('New deadline'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -331,7 +331,7 @@ class _EcranMasterState extends State<EcranMaster> {
                 TextField(
                   controller: titre,
                   maxLength: 60,
-                  decoration: const InputDecoration(hintText: 'ex. Rapport superviseur', counterText: ''),
+                  decoration: const InputDecoration(hintText: 'e.g. Supervisor report', counterText: ''),
                 ),
                 const SizedBox(height: 8),
                 Wrap(
@@ -348,7 +348,7 @@ class _EcranMasterState extends State<EcranMaster> {
                 const SizedBox(height: 12),
                 OutlinedButton.icon(
                   icon: const Icon(Icons.event_rounded),
-                  label: Text(choisie == null ? 'Choisir la date' : dateCourte(choisie!)),
+                  label: Text(choisie == null ? 'Pick the date' : dateCourte(choisie!)),
                   onPressed: () async {
                     final maintenant = DateTime.now();
                     final r = await showDatePicker(
@@ -364,8 +364,8 @@ class _EcranMasterState extends State<EcranMaster> {
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Annuler')),
-            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Ajouter')),
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Add')),
           ],
         ),
       ),
@@ -389,14 +389,14 @@ class _EcranMasterState extends State<EcranMaster> {
   Widget _carteObjectif(DonneesMaster d) {
     final fait = d.objectifDuJour && d.objectif['fait'] == true;
     final suggestions = [
-      for (final n in d.aLireNoms.take(5)) 'Lire $n',
+      for (final n in d.aLireNoms.take(5)) 'Read $n',
       for (final o in d.objectifsPasses.take(4)) o,
     ];
     return Carte(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Titre('Objectif du jour', icone: Icons.my_location_rounded),
+          const Titre('Daily goal', icone: Icons.my_location_rounded),
           TextField(
             controller: _objectif,
             focusNode: _fObjectif,
@@ -406,7 +406,7 @@ class _EcranMasterState extends State<EcranMaster> {
               'objectif': {'texte': t.trim(), 'fait': false}
             }),
             decoration: const InputDecoration(
-              hintText: 'ex. Lire Sonkoly 2024',
+              hintText: 'e.g. Read Sonkoly 2024',
               border: OutlineInputBorder(),
               isDense: true,
               counterText: '',
@@ -419,7 +419,7 @@ class _EcranMasterState extends State<EcranMaster> {
                 onPressed: () => _maj({
                   'objectif': {'texte': _objectif.text.trim(), 'fait': false}
                 }),
-                child: const Text('Enregistrer'),
+                child: const Text('Save'),
               ),
               const SizedBox(width: 10),
               if (d.objectifDuJour)
@@ -427,7 +427,7 @@ class _EcranMasterState extends State<EcranMaster> {
                   avatar: Icon(fait ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
                       size: 18, color: fait ? Couleurs.vert : Couleurs.gris),
                   showCheckmark: false,
-                  label: Text(fait ? 'Fait !' : 'Marquer comme fait'),
+                  label: Text(fait ? 'Done!' : 'Mark as done'),
                   selected: fait,
                   onSelected: (v) => _maj({
                     'objectif': {'texte': (d.objectif['texte'] ?? '').toString(), 'fait': v}
@@ -437,7 +437,7 @@ class _EcranMasterState extends State<EcranMaster> {
           ),
           if (suggestions.isNotEmpty) ...[
             const SizedBox(height: 10),
-            const Text('Idées (articles à lire, objectifs récents) :',
+            const Text('Ideas (papers to read, recent goals):',
                 style: TextStyle(color: Couleurs.gris, fontSize: 12)),
             const SizedBox(height: 6),
             Wrap(
@@ -475,31 +475,31 @@ class _EcranMasterState extends State<EcranMaster> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Titre('Avancement', icone: Icons.insights_rounded),
-          _barre('Lecture', lus >= 0 ? '$lus/${d.objectifArticles} articles' : 'dossiers à choisir',
+          const Titre('Progress', icone: Icons.insights_rounded),
+          _barre('Reading', lus >= 0 ? '$lus/${d.objectifArticles} papers' : 'pick the folders',
               lus, d.objectifArticles, violet,
-              detail: aLire >= 0 ? '$aLire à lire' : null),
+              detail: aLire >= 0 ? '$aLire to read' : null),
           const SizedBox(height: 12),
-          _barre('Rédaction aujourd\'hui', motsJour >= 0 ? '$motsJour/${d.objectifMots} mots' : 'mémoire à choisir',
+          _barre('Writing today', motsJour >= 0 ? '$motsJour/${d.objectifMots} words' : 'pick your thesis',
               motsJour, d.objectifMots, Couleurs.vert,
-              detail: mots >= 0 ? '$mots mots en tout' : null),
+              detail: mots >= 0 ? '$mots words in total' : null),
           const SizedBox(height: 12),
           Row(
             children: [
               const Icon(Icons.timer_outlined, size: 18, color: Couleurs.cyan),
               const SizedBox(width: 8),
-              Text('Master aujourd\'hui : ${duree(d.tempsJour)}', style: const TextStyle(color: Couleurs.doux)),
+              Text('Master today: ${duree(d.tempsJour)}', style: const TextStyle(color: Couleurs.doux)),
               if (cx.etat.masterActif) ...[
                 const SizedBox(width: 8),
                 const Icon(Icons.circle, size: 8, color: Couleurs.vert),
                 const SizedBox(width: 4),
-                const Text('en cours', style: TextStyle(color: Couleurs.vert, fontSize: 12)),
+                const Text('in progress', style: TextStyle(color: Couleurs.vert, fontSize: 12)),
               ],
             ],
           ),
           const SizedBox(height: 12),
           if (r == null)
-            const Text('Mesures : aucun résultat pour l\'instant (la Odin 3 et la photodiode arrivent).',
+            const Text('Measurements: no result yet (the Odin 3 and the photodiode are on the way).',
                 style: TextStyle(color: Couleurs.gris, fontSize: 13))
           else
             Row(
@@ -509,9 +509,9 @@ class _EcranMasterState extends State<EcranMaster> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Latence ${r['mediane']} ms  •  p95 ${r['p95']}',
+                      Text('Latency ${r['mediane']} ms  •  p95 ${r['p95']}',
                           style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-                      Text('Session ${r['session']} • ${r['n']} essais • ${r['mode']} ${r['hz']} Hz',
+                      Text('Session ${r['session']} • ${r['n']} trials • ${r['mode']} ${r['hz']} Hz',
                           style: const TextStyle(color: Couleurs.gris, fontSize: 12)),
                     ],
                   ),
@@ -565,12 +565,12 @@ class _EcranMasterState extends State<EcranMaster> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Titre('Réunion avec le superviseur', icone: Icons.groups_rounded),
+          const Titre('Meeting with the supervisor', icone: Icons.groups_rounded),
           OutlinedButton.icon(
             icon: const Icon(Icons.event_available_rounded),
             label: Text(quand == null
-                ? 'Choisir la date et l\'heure'
-                : '${dateCourte(quand)} à ${_deux(quand.hour)}:${_deux(quand.minute)}'),
+                ? 'Pick the date and time'
+                : '${dateCourte(quand)} at ${_deux(quand.hour)}:${_deux(quand.minute)}'),
             onPressed: () => _choisirReunion(quand),
           ),
           const SizedBox(height: 10),
@@ -579,7 +579,7 @@ class _EcranMasterState extends State<EcranMaster> {
             focusNode: _fQuestion,
             maxLength: 120,
             decoration: const InputDecoration(
-              hintText: 'Question à lui poser (ex. APA ou IEEE ?)',
+              hintText: 'Question to ask (e.g. APA or IEEE?)',
               border: OutlineInputBorder(),
               isDense: true,
               counterText: '',
@@ -592,7 +592,7 @@ class _EcranMasterState extends State<EcranMaster> {
                 onPressed: () => _maj({
                   'reunion': {'date': (d.reunion['date'] ?? '').toString(), 'question': _question.text.trim()}
                 }),
-                child: const Text('Enregistrer la question'),
+                child: const Text('Save the question'),
               ),
               const SizedBox(width: 8),
               if (quand != null)
@@ -600,7 +600,7 @@ class _EcranMasterState extends State<EcranMaster> {
                   onPressed: () => _maj({
                     'reunion': {'date': '', 'question': ''}
                   }),
-                  child: const Text('Effacer'),
+                  child: const Text('Clear'),
                 ),
             ],
           ),
@@ -635,7 +635,7 @@ class _EcranMasterState extends State<EcranMaster> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Titre('Phase et objectifs', icone: Icons.timeline_rounded),
+          const Titre('Phase and goals', icone: Icons.timeline_rounded),
           Wrap(
             spacing: 6,
             runSpacing: 6,
@@ -651,9 +651,9 @@ class _EcranMasterState extends State<EcranMaster> {
           const SizedBox(height: 14),
           Row(
             children: [
-              Expanded(child: _champNombre(_articles, 'Articles visés')),
+              Expanded(child: _champNombre(_articles, 'Target papers')),
               const SizedBox(width: 10),
-              Expanded(child: _champNombre(_mots, 'Mots par jour')),
+              Expanded(child: _champNombre(_mots, 'Words per day')),
             ],
           ),
           const SizedBox(height: 8),
@@ -662,7 +662,7 @@ class _EcranMasterState extends State<EcranMaster> {
               'objectif_articles': int.tryParse(_articles.text) ?? d.objectifArticles,
               'objectif_mots_jour': int.tryParse(_mots.text) ?? d.objectifMots,
             }),
-            child: const Text('Enregistrer les objectifs'),
+            child: const Text('Save the goals'),
           ),
         ],
       ),
@@ -678,10 +678,10 @@ class _EcranMasterState extends State<EcranMaster> {
   // ------------------------------------------------------------------ fichiers suivis
   Widget _carteFichiers(DonneesMaster d) {
     const noms = {
-      'memoire': ('Mémoire (.docx)', r'ex. D:\Master\redaction\memoire.docx'),
-      'a_lire': ('Dossier des PDF à lire', r'ex. D:\Master\articles\a_lire'),
-      'lus': ('Dossier des PDF lus', r'ex. D:\Master\articles\lus'),
-      'resultats': ('CSV des mesures', r'ex. D:\Master\experiences\resultats.csv'),
+      'memoire': ('Thesis (.docx)', r'e.g. D:\Master\redaction\memoire.docx'),
+      'a_lire': ('Folder of PDFs to read', r'e.g. D:\Master\articles\a_lire'),
+      'lus': ('Folder of read PDFs', r'e.g. D:\Master\articles\lus'),
+      'resultats': ('Measurements CSV', r'e.g. D:\Master\experiences\resultats.csv'),
     };
     return Carte(
       child: Column(
@@ -691,7 +691,7 @@ class _EcranMasterState extends State<EcranMaster> {
             onTap: () => setState(() => _fichiersOuverts = !_fichiersOuverts),
             child: Row(
               children: [
-                const Expanded(child: Titre('Fichiers suivis sur le PC', icone: Icons.folder_open_rounded)),
+                const Expanded(child: Titre('Files tracked on the PC', icone: Icons.folder_open_rounded)),
                 Icon(_fichiersOuverts ? Icons.expand_less_rounded : Icons.expand_more_rounded,
                     color: Couleurs.gris),
               ],
@@ -716,8 +716,8 @@ class _EcranMasterState extends State<EcranMaster> {
             )
           else ...[
             const Text(
-              'Copie le chemin depuis l\'Explorateur Windows (clic droit → Copier en tant que chemin d\'accès). '
-              'Le CSV : timestamp,session,essai,mode_xreal,refresh_hz,perf_mode,temp_c,latence_ms.',
+              'Copy the path from Windows Explorer (right-click → Copy as path). '
+              'The CSV: timestamp,session,essai,mode_xreal,refresh_hz,perf_mode,temp_c,latence_ms.',
               style: TextStyle(color: Couleurs.gris, fontSize: 12),
             ),
             const SizedBox(height: 10),
@@ -738,8 +738,8 @@ class _EcranMasterState extends State<EcranMaster> {
             TextField(
               controller: _motsWord,
               decoration: const InputDecoration(
-                labelText: 'Mots du titre Word comptés comme master',
-                helperText: 'Séparés par des virgules (ex. memoire, thesis, proposal)',
+                labelText: 'Word title keywords counted as master',
+                helperText: 'Comma-separated (e.g. memoire, thesis, proposal)',
                 border: OutlineInputBorder(),
                 isDense: true,
               ),
@@ -748,7 +748,7 @@ class _EcranMasterState extends State<EcranMaster> {
             TextField(
               controller: _motsCode,
               decoration: const InputDecoration(
-                labelText: 'Mots du titre VS Code comptés comme master',
+                labelText: 'VS Code title keywords counted as master',
                 border: OutlineInputBorder(),
                 isDense: true,
               ),
@@ -760,7 +760,7 @@ class _EcranMasterState extends State<EcranMaster> {
                 'mots_word': _decouper(_motsWord.text),
                 'mots_code': _decouper(_motsCode.text),
               }),
-              child: const Text('Enregistrer'),
+              child: const Text('Save'),
             ),
           ],
         ],

@@ -27,39 +27,39 @@ class ActionDadou {
 
 /// Actions du PC proposées dans l'onglet « PC » et comme favoris.
 const List<ActionDadou> actionsPc = [
-  ActionDadou(id: 'cmd:PLAY', nom: 'Lecture / pause', icone: Icons.play_arrow_rounded, ligne: 'PLAY', code: 'play'),
+  ActionDadou(id: 'cmd:PLAY', nom: 'Play / pause', icone: Icons.play_arrow_rounded, ligne: 'PLAY', code: 'play'),
   ActionDadou(id: 'cmd:VOL-', nom: 'Volume −', icone: Icons.volume_down_rounded, ligne: 'VOL-', code: 'vol_moins'),
   ActionDadou(id: 'cmd:VOL+', nom: 'Volume +', icone: Icons.volume_up_rounded, ligne: 'VOL+', code: 'vol_plus'),
-  ActionDadou(id: 'cmd:MUTE', nom: 'Muet', icone: Icons.volume_off_rounded, ligne: 'MUTE', code: 'muet'),
-  ActionDadou(id: 'cmd:NEXT', nom: 'Suivant', icone: Icons.skip_next_rounded, ligne: 'NEXT', code: 'suivant'),
+  ActionDadou(id: 'cmd:MUTE', nom: 'Mute', icone: Icons.volume_off_rounded, ligne: 'MUTE', code: 'muet'),
+  ActionDadou(id: 'cmd:NEXT', nom: 'Next', icone: Icons.skip_next_rounded, ligne: 'NEXT', code: 'suivant'),
   ActionDadou(
       id: 'cmd:ECRAN_BASCULE',
-      nom: 'Écran noir',
+      nom: 'Black screen',
       icone: Icons.desktop_access_disabled_rounded,
       ligne: 'ECRAN_BASCULE',
       code: 'ecran'),
-  ActionDadou(id: 'cmd:VERROU', nom: 'Verrouiller', icone: Icons.lock_rounded, ligne: 'VERROU', code: 'verrou'),
+  ActionDadou(id: 'cmd:VERROU', nom: 'Lock', icone: Icons.lock_rounded, ligne: 'VERROU', code: 'verrou'),
   ActionDadou(
-      id: 'cmd:KEY win+d', nom: 'Bureau', icone: Icons.space_dashboard_rounded, ligne: 'KEY win+d', code: 'bureau'),
+      id: 'cmd:KEY win+d', nom: 'Desktop', icone: Icons.space_dashboard_rounded, ligne: 'KEY win+d', code: 'bureau'),
   ActionDadou(
       id: 'cmd:VEILLE',
-      nom: 'Veille',
+      nom: 'Sleep',
       icone: Icons.bedtime_rounded,
       ligne: 'VEILLE',
       code: 'veille',
       couleur: Couleurs.orange,
-      confirmation: 'Le PC va se mettre en veille tout de suite. Il ne sera plus joignable '
-          'depuis le téléphone avant d\'être réveillé.'),
+      confirmation: 'The PC will go to sleep right away. The phone will not reach it '
+          'until it wakes up.'),
   ActionDadou(
       id: 'cmd:ARRET',
-      nom: 'Éteindre le PC',
+      nom: 'Shut down the PC',
       icone: Icons.power_settings_new_rounded,
       ligne: 'ARRET',
       code: 'power',
       couleur: Couleurs.rouge,
-      confirmation: 'Le PC s\'éteindra dans 60 secondes. Tu pourras encore annuler.'),
+      confirmation: 'The PC will shut down in 60 seconds. You can still cancel.'),
   ActionDadou(
-      id: 'cmd:ANNULER', nom: 'Annuler l\'arrêt', icone: Icons.cancel_rounded, ligne: 'ANNULER', code: 'annuler'),
+      id: 'cmd:ANNULER', nom: 'Cancel shutdown', icone: Icons.cancel_rounded, ligne: 'ANNULER', code: 'annuler'),
 ];
 
 /// Icônes possibles pour un raccourci (même liste que le programme PC).
@@ -143,7 +143,7 @@ List<ActionDadou> favorisResolus(Connexion cx) => [for (final id in cx.favoris) 
 /// Lance une action (avec une question avant si elle est « dangereuse »).
 Future<void> lancerAction(BuildContext context, Connexion cx, ActionDadou a) async {
   if (a.confirmation != null) {
-    final ok = await confirmer(context, '${a.nom} ?', a.confirmation!);
+    final ok = await confirmer(context, '${a.nom}?', a.confirmation!);
     if (!ok) return;
   }
   cx.cmd(a.ligne);
