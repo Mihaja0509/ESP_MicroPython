@@ -2,6 +2,9 @@
     <uses-permission android:name="android.permission.INTERNET"/>
     <!-- Phase 11 : notification « PC inutilisé » -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- Phase 12 : émetteur infrarouge du téléphone (permission normale, sans demande à l'écran) -->
+    <uses-permission android:name="android.permission.TRANSMIT_IR"/>
+    <uses-feature android:name="android.hardware.consumerir" android:required="false"/>
     <application
         android:label="Dadou"
         android:usesCleartextTraffic="true"

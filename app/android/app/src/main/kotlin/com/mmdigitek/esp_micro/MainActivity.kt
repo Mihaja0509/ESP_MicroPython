@@ -5,6 +5,7 @@ import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.pm.PackageManager
+import android.hardware.ConsumerIrManager
 import android.os.Build
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -52,6 +53,26 @@ class MainActivity : FlutterActivity() {
                         demanderPermission()
                         VeilleurPC.tester(applicationContext)
                         resultat.success(true)
+                    }
+                    else -> resultat.notImplemented()
+                }
+            }
+        // Phase 12 : clim infrarouge. L'émetteur IR du téléphone envoie la trame calculée par
+        // Dart (lib/clim_ir.dart) : « disponible » (le téléphone a-t-il un émetteur ?) et « emettre ».
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "dadou/ir")
+            .setMethodCallHandler { appel, resultat ->
+                val ir = getSystemService(Context.CONSUMER_IR_SERVICE) as? ConsumerIrManager
+                when (appel.method) {
+                    "disponible" -> resultat.success(ir != null && ir.hasIrEmitter())
+                    "emettre" -> {
+                        val frequence = appel.argument<Int>("frequence") ?: 38000
+                        val motif = appel.argument<List<Int>>("motif")
+                        if (ir == null || !ir.hasIrEmitter() || motif == null) {
+                            resultat.success(false)
+                        } else {
+                            ir.transmit(frequence, motif.toIntArray())
+                            resultat.success(true)
+                        }
                     }
                     else -> resultat.notImplemented()
                 }
