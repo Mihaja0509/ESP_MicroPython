@@ -48,11 +48,26 @@ class ClimPlan {
       _appeler('auto', {'json': jsonEncode(reglages)});
   static Future<void> publier() => _appeler('publier');
 
-  static Future<bool> minuteur(int duree, int delai) async {
+  /// Version de la partie Android attendue par ce Dart (voir ClimPlan.VERSION côté Kotlin).
+  static const int versionAttendue = 2;
+
+  /// Version de la partie Android installée. 0 = injoignable ou trop ancienne (un rechargement à
+  /// chaud ne met à jour que le Dart : il faut réinstaller l'APK).
+  static Future<int> versionNative() async {
+    try {
+      return await _canal.invokeMethod<int>('version') ?? 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  /// Lance le minuteur : la clim est allumée pendant [secondes], démarrage dans [delaiSecondes].
+  /// Les durées sont TOUJOURS en secondes, de bout en bout.
+  static Future<bool> minuteur(int secondes, int delaiSecondes) async {
     try {
       return await _canal.invokeMethod<bool>('minuteur', {
-            'duree': duree,
-            'delai': delai,
+            'secondes': secondes,
+            'delaiSecondes': delaiSecondes,
           }) ??
           false;
     } catch (_) {
@@ -83,6 +98,10 @@ class ClimPlan {
 
 String _hhmm(int minutes) =>
     '${(minutes ~/ 60).toString().padLeft(2, '0')}:${(minutes % 60).toString().padLeft(2, '0')}';
+
+const String _messageNatifAncien =
+    'The Android part of the app is outdated (a hot reload only updates the Dart part). '
+    'Reinstall the APK, then try again.';
 
 // ---------------------------------------------------------------- durées du minuteur (Phase 14)
 /// Durée maximale du minuteur : 24 h.
@@ -157,6 +176,7 @@ class _CarteClimPlanState extends State<CarteClimPlan> {
   Map<String, dynamic> _rt =
       {}; // état côté Android : on, minuteurFin, phase, exact…
   int _duree = 30 * 60; // durée du minuteur en SECONDES (champs h / min / s)
+  bool _natifAJour = true; // la partie Android installée est-elle à jour ? (voir versionNative)
   final _champH = TextEditingController();
   final _champM = TextEditingController();
   final _champS = TextEditingController();
@@ -210,8 +230,10 @@ class _CarteClimPlanState extends State<CarteClimPlan> {
   Future<void> _charger() async {
     final p = await SharedPreferences.getInstance();
     final rt = await ClimPlan.etat();
+    final version = await ClimPlan.versionNative();
     if (!mounted) return;
     setState(() {
+      _natifAJour = version >= ClimPlan.versionAttendue;
       // dernière durée utilisée (secondes) ; l'ancienne valeur en minutes est reprise une fois
       final secondes =
           p.getInt('plan_duree_s') ?? (p.getInt('plan_duree') ?? 30) * 60;
@@ -267,6 +289,12 @@ class _CarteClimPlanState extends State<CarteClimPlan> {
     _champTermine();
     final erreur = verifierDuree(_duree);
     if (erreur != null) return;
+    if (!_natifAJour) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text(_messageNatifAncien)),
+      );
+      return;
+    }
     HapticFeedback.selectionClick();
     final ok = await ClimPlan.minuteur(_duree, 0);
     await _rafraichir();
@@ -475,6 +503,14 @@ class _CarteClimPlanState extends State<CarteClimPlan> {
                 style: const TextStyle(color: Couleurs.orange, fontSize: 12),
               ),
             ),
+          if (!_natifAJour)
+            const Padding(
+              padding: EdgeInsets.only(top: 4),
+              child: Text(
+                _messageNatifAncien,
+                style: TextStyle(color: Couleurs.rouge, fontSize: 12),
+              ),
+            ),
           const SizedBox(height: 4),
           Wrap(
             spacing: 6,
@@ -496,7 +532,9 @@ class _CarteClimPlanState extends State<CarteClimPlan> {
             children: [
               Expanded(
                 child: FilledButton.icon(
-                  onPressed: erreurDuree == null ? _lancerMinuteur : null,
+                  onPressed: (erreurDuree == null && _natifAJour)
+                      ? _lancerMinuteur
+                      : null,
                   icon: const Icon(Icons.play_arrow_rounded),
                   label: Text('Run for ${formaterReste(_duree)}'),
                 ),

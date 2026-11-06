@@ -97,8 +97,13 @@ class MainActivity : FlutterActivity() {
                         ClimPlan.setOn(c, appel.argument<Boolean>("on") ?: false)
                         resultat.success(true)
                     }
+                    "version" -> resultat.success(ClimPlan.VERSION)
                     "minuteur" -> resultat.success(
-                        ClimPlan.minuteur(c, appel.argument<Int>("duree") ?: 1800, appel.argument<Int>("delai") ?: 0)
+                        ClimPlan.minuteur(
+                            c,
+                            appel.argument<Int>("secondes") ?: 1800,
+                            appel.argument<Int>("delaiSecondes") ?: 0
+                        )
                     )
                     "annulerMinuteur" -> {
                         ClimPlan.annulerMinuteur(c)

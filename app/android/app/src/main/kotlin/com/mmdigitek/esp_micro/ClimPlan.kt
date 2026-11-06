@@ -33,6 +33,13 @@ object ClimPlan {
     const val CODE_FEN_ON = 103
     const val CODE_FEN_OFF = 104
     const val CODE_AUTO = 105
+
+    /**
+     * Version de la partie Android, demandée par Dart (canal « version »). 2 = minuteur en SECONDES
+     * (Phase 14). Un rechargement à chaud ne met à jour que le Dart : si le Kotlin installé est plus
+     * ancien, Dart le voit et refuse d'envoyer des secondes que l'ancien code lirait comme des minutes.
+     */
+    const val VERSION = 2
     private const val PAUSE_COMPRESSEUR_MS = 3 * 60_000L // le compresseur ne redémarre pas avant 3 min
     private const val MANUEL_MS = 30 * 60_000L           // après une action à la main, l'auto se tait
 
@@ -128,15 +135,19 @@ object ClimPlan {
     }
 
     // ------------------------------------------------------------------ minuteur
-    /** « Marche pendant [duree] secondes » (démarrage dans [delai] secondes, 0 = tout de suite). */
-    fun minuteur(c: Context, duree: Int, delai: Int): Boolean {
-        if (duree < 1) return false
+    /** Heure de fin (ms) d'un minuteur : démarrage dans [delaiSecondes] puis [dureeSecondes] de marche. */
+    fun finMinuteur(maintenant: Long, delaiSecondes: Int, dureeSecondes: Int): Long =
+        maintenant + delaiSecondes * 1_000L + dureeSecondes * 1_000L
+
+    /** « Marche pendant [dureeSecondes] secondes » (démarrage dans [delaiSecondes] s, 0 = tout de suite). */
+    fun minuteur(c: Context, dureeSecondes: Int, delaiSecondes: Int): Boolean {
+        if (dureeSecondes < 1) return false
         val maintenant = System.currentTimeMillis()
         annuler(c, CODE_MIN_ON)
         annuler(c, CODE_MIN_OFF)
-        val debut = maintenant + delai * 1_000L
-        val fin = debut + duree * 1_000L
-        if (delai <= 0) {
+        val debut = maintenant + delaiSecondes * 1_000L
+        val fin = finMinuteur(maintenant, delaiSecondes, dureeSecondes)
+        if (delaiSecondes <= 0) {
             if (!allume(c) && !allumer(c)) return false
             p(c).edit().putLong("minuteur_debut", 0).apply()
         } else {
