@@ -364,6 +364,8 @@ class Interface:
         duree_ancien = self._age(self.mode_depuis, maintenant)
         self.mode = nouveau
         self.mode_depuis = maintenant
+        # Phase 11-ter : le PC écrit cette ligne dans agent.log (« [esp32] MODE … »)
+        print("MODE %s <- %s (%d s)" % (nouveau, ancien, duree_ancien // 1000))
         if nouveau == "jeu":
             nom = etat["evt"]["jeu"]
             # nouvelle session si autre jeu, ou si on revient après plus de 10 min
@@ -702,11 +704,12 @@ class Interface:
                  ("etirer", "Stand up and stretch a bit"),
                  ("livre", "One page of your thesis today?")]
         jours = etat.get("meteo") or []
-        if jours:
+        actuel = etat.get("meteo_now")
+        if actuel and actuel["pluie"]:  # il pleut maintenant (météo actuelle, pas celle de la journée)
+            liste.insert(0, ("fenetre", "It's raining: windows closed?"))
+        elif jours:
             j = jours[0]
-            if j["icone"] in ("pluie", "orage"):
-                liste.insert(0, ("fenetre", "It's raining: windows closed?"))
-            elif j["pluie"] >= 40 and j["heure_pluie"] is not None and j["heure_pluie"] >= heure:
+            if j["pluie"] >= 40 and j["heure_pluie"] is not None and j["heure_pluie"] > heure:
                 liste.insert(0, ("fenetre", "Rain around %d: close the windows" % j["heure_pluie"]))
         if self.dernier_jeu and 8 <= heure < 23:
             liste.append(("manette", "Back to %s?" % self.dernier_jeu))

@@ -106,7 +106,8 @@ MUET_MAX = 300      # s : après 5 min réveillé sans personne, on reprend quan
 REGLAGES_DEFAUT = {"ville": "", "latitude": None, "longitude": None}
 URL_METEO = ("https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
              "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max"
-             "&hourly=precipitation_probability&timezone=auto&forecast_days=2")
+             "&hourly=precipitation_probability&current=weather_code,precipitation"
+             "&timezone=auto&forecast_days=2")
 URL_VILLE = "https://geocoding-api.open-meteo.com/v1/search?count=1&language=fr&name={nom}"
 URL_LHM = "http://localhost:8085/data.json"
 # Processus jamais considérés comme des jeux pour le calcul des FPS
@@ -226,11 +227,10 @@ def _volume_endpoint():
     ev = getattr(dev, "EndpointVolume", None)  # pycaw récent
     if ev is not None:
         return ev
-    from ctypes import POINTER, cast  # ancien pycaw
-    from comtypes import CLSCTX_ALL
+    from comtypes import CLSCTX_ALL  # ancien pycaw
     from pycaw.pycaw import IAudioEndpointVolume
     itf = dev.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-    return cast(itf, POINTER(IAudioEndpointVolume))
+    return itf.QueryInterface(IAudioEndpointVolume)
 
 
 def volume():
@@ -446,6 +446,8 @@ def nom_court_audio(nom):
 def _appareil_defaut():
     """Sortie audio par défaut, sous la forme d'un AudioDevice pycaw (ou None)."""
     dev = AudioUtilities.GetSpeakers()
+    if getattr(dev, "FriendlyName", None) is not None:
+        return dev  # pycaw récent : GetSpeakers donne déjà l'appareil complet (pas besoin de GetAllDevices)
     ident = getattr(dev, "id", None)
     if not isinstance(ident, str):
         ident = dev.GetId()
@@ -712,6 +714,7 @@ class DetecteurJeu:
 INACTIF_APRES = 180      # s sans clavier ni souris (et sans jeu ni vidéo) = PC inutilisé
 VIDEO_SON = 8            # s : la vidéo doit faire du son depuis moins de 8 s…
 VIDEO_TOLERANCE = 8      # … et la scène cinéma reste 8 s après (pause courte, épisode suivant)
+VIDEO_SORTIE = 2         # Phase 11-ter : fenêtre vidéo quittée -> retour à la scène normale en 2 s
 FICHIER_STATS = DOSSIER / "stats_jeux.json"   # temps de jeu (jamais dans Git)
 NAVIGATEURS = {"chrome.exe", "msedge.exe", "firefox.exe", "opera.exe", "opera_gx.exe",
                "brave.exe", "vivaldi.exe"}
@@ -726,7 +729,17 @@ LECTEURS_VIDEO = {"vlc.exe": "VLC", "mpc-hc.exe": "MPC", "mpc-hc64.exe": "MPC",
 _COMPTEUR_SON = {"m": None, "t": 0.0}
 
 
+_SON_MESURE = {"v": None, "t": 0.0}   # Phase 11-ter : rempli par le fil audio (LecteurAudio)
+
+
 def son_en_cours():
+    """Dernier résultat du fil audio (moins de 3 s) : True / False, ou None si inconnu."""
+    if time.time() - _SON_MESURE["t"] > 3:
+        return None
+    return _SON_MESURE["v"]
+
+
+def mesurer_son():
     """Vrai si la sortie audio joue du son ; None si on ne peut pas le savoir (pycaw absent)."""
     if AudioUtilities is None:
         return None
@@ -813,14 +826,16 @@ class DetecteurVideo:
         self.actuelle = ""
         self.perdue = 0.0
 
-    def video(self):
-        """« Source|Titre » (texte pour l'ESP32) ou '' si aucune vidéo."""
+    def video(self, media=None):
+        """« Source|Titre » (texte pour l'ESP32) ou '' si aucune vidéo.
+        media : lecture des contrôles multimédias de Windows (une vidéo en pause y est encore)."""
         maintenant = time.time()
         source, titre = video_premier_plan()
         son = son_en_cours()
         if son or son is None:
             self.son_vu = maintenant
-        if source and maintenant - self.son_vu < VIDEO_SON:
+        connue = bool(media) and media.get("duree", 0) > 0
+        if source and (maintenant - self.son_vu < VIDEO_SON or connue):
             texte = texte_ascii(source)
             if titre:
                 texte += "|" + texte_ascii(titre).replace("|", "/")[:90]
@@ -829,10 +844,46 @@ class DetecteurVideo:
         if self.actuelle:
             if not self.perdue:
                 self.perdue = maintenant
-            if maintenant - self.perdue < VIDEO_TOLERANCE:
+            # fenêtre vidéo quittée : sortie rapide ; même fenêtre sans son : petite pause tolérée
+            if maintenant - self.perdue < (VIDEO_TOLERANCE if source else VIDEO_SORTIE):
                 return self.actuelle
             self.actuelle = ""
         return ""
+
+
+class LecteurAudio:
+    """Phase 11-ter : sortie audio (casque), volume et niveau sonore lus dans un fil à part.
+    Pendant un jeu, Windows peut mettre plusieurs secondes à répondre (pycaw) : avant, ça bloquait
+    la boucle des mesures et l'ESP32 ne recevait plus rien pendant plus de 12 s (« PC asleep »)."""
+
+    def __init__(self):
+        self.sortie = ("", False)   # (nom, externe)
+        self.volume = -1
+        if AudioUtilities is not None:
+            threading.Thread(target=self._fil, daemon=True).start()
+
+    def _fil(self):
+        if comtypes is not None:
+            comtypes.CoInitialize()
+        endpoint, endpoint_t, sortie_t, signale = None, 0.0, 0.0, 0.0
+        while True:
+            debut = time.time()
+            try:
+                if endpoint is None or debut - endpoint_t > 10:  # gardé 10 s (suit casque <-> HP)
+                    endpoint, endpoint_t = _volume_endpoint(), debut
+                self.volume = round(endpoint.GetMasterVolumeLevelScalar() * 100)
+            except Exception:
+                endpoint, self.volume = None, -1
+            _SON_MESURE["v"] = mesurer_son()
+            _SON_MESURE["t"] = time.time()
+            if debut - sortie_t >= 2:
+                sortie_t = debut
+                self.sortie = sortie_audio()
+            duree = time.time() - debut
+            if duree > 3 and time.time() - signale > 60:
+                signale = time.time()
+                print(f"[agent] son de Windows lent : {duree:.1f} s (sans effet sur l'ESP32)")
+            time.sleep(max(0.1, 0.5 - duree))
 
 
 class StatsJeux:
@@ -1098,6 +1149,7 @@ class Meteo:
     def __init__(self):
         self.jours = []
         self.version = 0          # augmente à chaque nouvelle météo
+        self.actuel = None        # Phase 11-ter : (icône, il pleut maintenant 0/1)
         self.derniere = 0.0
         self.probleme = ""
         self.en_cours = False
@@ -1122,7 +1174,7 @@ class Meteo:
         return float(res[0]["latitude"]), float(res[0]["longitude"])
 
     def a_mettre_a_jour(self):
-        attente = 1800 if self.jours else 300  # 30 min, ou 5 min tant qu'on n'a rien
+        attente = 900 if self.jours else 300  # 15 min, ou 5 min tant qu'on n'a rien
         return not self.en_cours and time.time() - self.derniere > attente
 
     def lancer(self):
@@ -1137,6 +1189,7 @@ class Meteo:
             lat, lon = self.position
             d = _json(URL_METEO.format(lat=lat, lon=lon))
             self.jours = self._lire(d)
+            self.actuel = self._lire_actuel(d)
             self.version += 1
             self.probleme = ""
         except Exception as e:
@@ -1168,9 +1221,22 @@ class Meteo:
                           meilleure, heure))
         return jours
 
+    @staticmethod
+    def _lire_actuel(d):
+        """(icône, 1 s'il pleut maintenant sinon 0) d'après la météo actuelle, ou None."""
+        c = d.get("current") or {}
+        if "weather_code" not in c:
+            return None
+        code = int(c.get("weather_code") or 0)
+        pluie = (c.get("precipitation") or 0) > 0.05 or 51 <= code <= 67 or 80 <= code <= 82 or code >= 95
+        return icone_meteo(code), 1 if pluie else 0
+
     def lignes(self):
-        return [f"METEO_J {i} {ic} {tmax} {tmin} {pluie} {heure}"
-                for i, (ic, tmax, tmin, pluie, heure) in enumerate(self.jours)]
+        lignes = [f"METEO_J {i} {ic} {tmax} {tmin} {pluie} {heure}"
+                  for i, (ic, tmax, tmin, pluie, heure) in enumerate(self.jours)]
+        if self.actuel:
+            lignes.append(f"METEO_NOW {self.actuel[0]} {self.actuel[1]}")
+        return lignes
 
 
 def est_admin():
@@ -1220,6 +1286,14 @@ def pc_verrouille():
     ok = u.SwitchDesktop(ctypes.c_void_p(h))
     u.CloseDesktop(ctypes.c_void_p(h))
     return not ok
+
+
+def uac_ouvert():
+    """Vrai si la fenêtre d'autorisation administrateur (consent.exe) est ouverte."""
+    try:
+        return any((p.info["name"] or "").lower() == "consent.exe" for p in psutil.process_iter(["name"]))
+    except psutil.Error:
+        return False
 
 
 class _LASTINPUTINFO(ctypes.Structure):
@@ -1850,6 +1924,9 @@ class Agent:
         self.master = SuiviMaster(DOSSIER)  # Phase 11 : suivi du master
         self.media = LecteurMedia()          # Phase 11-bis : position de la vidéo
         self.video_pos = None
+        self.audio = LecteurAudio()          # Phase 11-ter : son lu à part
+        self.dernier_envoi = time.time()     # dernier envoi STAT par la boucle des mesures
+        self.verrou_depuis = 0.0
         self.arret_fin = 0.0     # heure prévue de l'arrêt du PC (0 = pas d'arrêt)
         self.lum_esp = max(5, min(100, int(charger_preferences().get("lum_esp", 85))))
         self.lent["ecrans"] = 1
@@ -1917,10 +1994,11 @@ class Agent:
         # --- mesures rapides : 4 fois par seconde ---
         cpu = round(psutil.cpu_percent(interval=None))
         ram = round(psutil.virtual_memory().percent)
-        vol = self._garder("vol", volume(), 10)
+        vol = self._garder("vol", self.audio.volume, 10)
         bat, charge = self.lent["bat"]
         self.dernier_stat = f"STAT {cpu} {ram} {vol} {bat} {charge}"
         self.liaison.envoyer(self.dernier_stat)
+        self.dernier_envoi = time.time()
         t, u, mem = gpu()
         t = self._garder("gpu_t", t)
         u = self._garder("gpu_u", u)
@@ -1996,6 +2074,32 @@ class Agent:
             return ancien[0]
         return valeur
 
+    def _verrou_stable(self):
+        """Verrouillé seulement après 4 s de suite, et jamais pendant la fenêtre d'autorisation
+        administrateur (UAC) : elle change aussi de bureau, ce n'est pas un verrouillage."""
+        if not pc_verrouille():
+            self.verrou_depuis = 0.0
+            return False
+        if not self.verrou_depuis:
+            self.verrou_depuis = time.time()
+        return time.time() - self.verrou_depuis >= 4 and not uac_ouvert()
+
+    def boucle_secours(self):
+        """Phase 11-ter : si la boucle des mesures prend du retard, renvoie les dernières valeurs
+        chaque seconde. Tant que l'agent tourne, l'ESP32 ne croit jamais que le PC dort."""
+        signale = 0.0
+        while self.actif:
+            time.sleep(1)
+            retard = time.time() - self.dernier_envoi
+            if retard > 2 and self.dernier_stat:
+                for ligne in (self.dernier_stat, self.dernier_gpu, self.dernier_perf):
+                    if ligne:
+                        self.liaison.envoyer(ligne)
+                if retard > 5 and time.time() - signale > 60:
+                    signale = time.time()
+                    print(f"[agent] boucle des mesures en retard de {retard:.0f} s : "
+                          "dernières valeurs renvoyées à l'ESP32")
+
     def _mesures_lentes(self):
         if time.time() - self.dernier_temps > 60:
             self.dernier_temps = time.time()
@@ -2025,13 +2129,14 @@ class Agent:
             if outil.probleme != self.problemes.get(nom):
                 self.problemes[nom] = outil.probleme
                 print(f"[agent] {nom} : {outil.probleme or 'OK'}")
-        nom, externe = sortie_audio()
+        nom, externe = self.audio.sortie
         jeu = self.jeux.jeu(gpu()[1])
-        verrou = pc_verrouille()
+        verrou = self._verrou_stable()
         # Phase 10 : vidéo au premier plan, PC allumé mais inutilisé (en minutes, 0 = utilisé)
-        video = "" if (jeu or verrou) else self.video.video()
+        media_brut = None if (jeu or verrou) else self.media.actuel()
+        video = "" if (jeu or verrou) else self.video.video(media_brut)
         # Phase 11-bis : position de la vidéo (contrôles multimédias de Windows)
-        media = self.media.actuel() if video else None
+        media = media_brut if video else None
         if media and "|" not in video and media["titre"]:
             video += "|" + texte_ascii(media["titre"]).replace("|", "/")[:90]
         self.video_pos = media
@@ -2377,6 +2482,7 @@ def main():
 
     agent = Agent(Liaison(args.port))
     threading.Thread(target=agent.boucle_mesures, daemon=True).start()
+    threading.Thread(target=agent.boucle_secours, daemon=True).start()  # Phase 11-ter
     if ServeurApp is not None:
         ServeurApp(FICHIER_APPAREILS, agent.rappels_app()).demarrer()
         print("[agent] adresses du PC pour l'app : "

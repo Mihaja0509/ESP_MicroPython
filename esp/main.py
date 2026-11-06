@@ -39,7 +39,8 @@ etat = {"connecte": False, "stat": stat, "gpu": gpu, "perf": perf, "evt": evt, "
         "arret_fin": None,     # ticks de la fin du compte à rebours d'arrêt (None = pas d'arrêt)
         "arret_total": 60000,  # durée du compte à rebours (ms), pour la barre
         "lum": 85,             # luminosité choisie dans l'app (5 à 100)
-        "master": None}        # Phase 11 : données du master (ligne MASTER du PC)
+        "master": None,        # Phase 11 : données du master (ligne MASTER du PC)
+        "meteo_now": None}     # Phase 11-ter : météo actuelle {icone, pluie}
 
 ATTENTE_ABSENT = 12000     # sans données depuis 12 s = PC éteint / en veille / agent arrêté
 RETOUR_PC = 5000           # il faut 5 s de données sans coupure pour dire « le PC est revenu »
@@ -169,6 +170,14 @@ def executer(ligne):
             return "OK " + " | ".join("%s %d/%d pluie %d%% vers %sh" % (
                 j["icone"], j["tmax"], j["tmin"], j["pluie"], j["heure_pluie"]) for j in etat["meteo"])
         return "ERR pas encore de meteo (" + (meteo.probleme or "attente") + ")"
+    if cmd == "METEO_NOW":
+        # météo actuelle envoyée par le PC : METEO_NOW icone pluie (1 = il pleut maintenant)
+        try:
+            p = arg.split()
+            etat["meteo_now"] = {"icone": p[0], "pluie": int(p[1]) == 1}
+        except (ValueError, IndexError):
+            return "ERR utilise : METEO_NOW icone pluie"
+        return "OK"
     if cmd == "METEO_J":
         # météo envoyée par le programme PC : METEO_J jour icone max min pluie heure
         try:
