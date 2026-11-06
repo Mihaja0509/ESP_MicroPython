@@ -718,6 +718,7 @@ VIDEO_SON = 8            # s : la vidéo doit faire du son depuis moins de 8 s�
 VIDEO_TOLERANCE = 8      # … et la scène cinéma reste 8 s après (pause courte, épisode suivant)
 VIDEO_SORTIE = 2         # Phase 11-ter : fenêtre vidéo quittée -> retour à la scène normale en 2 s
 FICHIER_STATS = DOSSIER / "stats_jeux.json"   # temps de jeu (jamais dans Git)
+CLIM_PEREMPTION = 90   # s : sans /clim_maj du téléphone pendant ce temps, la clim est remise à « off »
 NAVIGATEURS = {"chrome.exe", "msedge.exe", "firefox.exe", "opera.exe", "opera_gx.exe",
                "brave.exe", "vivaldi.exe"}
 # mot cherché dans le titre de l'onglet -> nom affiché
@@ -1942,13 +1943,24 @@ class Agent:
         self.piece = {}          # Phase 13 : dernière mesure du capteur (CLIMAT), voir lire_climat
         self.clim = None         # Phase 13 : état de la clim donné par le téléphone (/clim_maj)
         self.clim_envoye = 0.0   # Phase 14 : heure du dernier envoi de la ligne CLIM à l'ESP32
+        self.clim_recu = 0.0     # Phase 14-bis : heure du dernier /clim_maj reçu du téléphone
+        self.clim_cle = None     # dernier état journalisé (une ligne de journal par changement)
         self.lent["ecrans"] = 1
         self.noir = EcranNoir(fin_de_session=self._fin_de_session)
+
+    def clim_eteinte_esp(self):
+        """Phase 14-bis : l'agent s'arrête (ou Windows ferme la session) : l'ESP32 n'affiche plus de clim."""
+        try:
+            self.liaison.muet = False
+            self.liaison.envoyer("CLIM 0 cool 24 0 0 0")
+        except Exception:
+            pass
 
     def _fin_de_session(self):
         """Windows ferme la session (arrêt ou redémarrage, même lancé depuis le menu Démarrer) :
         l'ESP32 dit au revoir puis s'éteint quand les données s'arrêtent."""
         print("[agent] fin de session Windows : au revoir")
+        self.clim_eteinte_esp()
         self.liaison.muet = False
         self.liaison.envoyer("EVT ARRET -1")
 
@@ -2118,6 +2130,31 @@ class Agent:
                     print(f"[agent] boucle des mesures en retard de {retard:.0f} s : "
                           "dernières valeurs renvoyées à l'ESP32")
 
+    def _envoyer_clim(self):
+        """Phase 14-bis : envoie la ligne CLIM à l'ESP32 (changement d'état, recalage toutes les 20 s) et
+        remet la clim à « off » si le téléphone n'a rien dit depuis CLIM_PEREMPTION secondes."""
+        c = self.clim
+        if c and time.time() - self.clim_recu > CLIM_PEREMPTION and (
+                c["on"] or c["fin"] or c["auto"] or c["plage"] != "0"):
+            # Phase 14-bis : rien du téléphone depuis 90 s (téléphone éteint, hors réseau, app tuée) :
+            # on ne garde pas une clim « fantôme » allumée sur l'écran de l'ESP32.
+            print(f"[agent] clim : plus de nouvelles du téléphone depuis {CLIM_PEREMPTION} s, état remis à off")
+            c = self.clim = {"on": 0, "mode": c["mode"], "temp": c["temp"], "fin": 0, "auto": 0, "plage": "0"}
+            self.clim_cle = None
+            self.precedent.pop("CLIM", None)
+        if c:
+            # Phase 14 : reste en SECONDES. La ligne ne part que si l'état change (ou toutes les
+            # 20 s pour recaler le compte à rebours de l'ESP32, qui compte seul entre-temps).
+            reste = max(0, int(c["fin"] - time.time() + 0.999)) if c["fin"] else 0
+            cle = "%d %s %d %d %d %s" % (c["on"], c["mode"], c["temp"], 1 if reste > 0 else 0,
+                                         c["auto"], c["plage"])
+            maintenant = time.time()
+            if self.precedent.get("CLIM") != cle or maintenant - self.clim_envoye >= 20:
+                self.precedent["CLIM"] = cle
+                self.clim_envoye = maintenant
+                self.liaison.envoyer("CLIM %d %s %d %d %d %s" % (c["on"], c["mode"], c["temp"], reste,
+                                                                c["auto"], c["plage"]))
+
     def _mesures_lentes(self):
         if time.time() - self.dernier_temps > 60:
             self.dernier_temps = time.time()
@@ -2134,19 +2171,7 @@ class Agent:
         if self.precedent.get("ROT_ESP") != self.rot_esp:
             self.precedent["ROT_ESP"] = self.rot_esp
             self.liaison.envoyer(f"ROT_ESP {self.rot_esp}")
-        c = self.clim
-        if c:
-            # Phase 14 : reste en SECONDES. La ligne ne part que si l'état change (ou toutes les
-            # 20 s pour recaler le compte à rebours de l'ESP32, qui compte seul entre-temps).
-            reste = max(0, int(c["fin"] - time.time() + 0.999)) if c["fin"] else 0
-            cle = "%d %s %d %d %d %s" % (c["on"], c["mode"], c["temp"], 1 if reste > 0 else 0,
-                                         c["auto"], c["plage"])
-            maintenant = time.time()
-            if self.precedent.get("CLIM") != cle or maintenant - self.clim_envoye >= 20:
-                self.precedent["CLIM"] = cle
-                self.clim_envoye = maintenant
-                self.liaison.envoyer("CLIM %d %s %d %d %d %s" % (c["on"], c["mode"], c["temp"], reste,
-                                                                c["auto"], c["plage"]))
+        self._envoyer_clim()
         reste = self.arret_reste()
         if self.precedent.get("ARRET") != (reste > 0):
             self.precedent["ARRET"] = reste > 0
@@ -2493,6 +2518,14 @@ class Agent:
             }
         except (TypeError, ValueError):
             return
+        self.clim_recu = time.time()
+        n = self.clim
+        cle = (n["on"], n["mode"], n["temp"], n["auto"], n["plage"], n["fin"] > 0)
+        if cle != self.clim_cle:  # une ligne de journal par changement (pas à chaque republication)
+            self.clim_cle = cle
+            print("[agent] clim : %s %s %d°, minuteur %s, auto %d, plage %s" % (
+                "on" if n["on"] else "off", n["mode"], n["temp"],
+                ("%d s" % max(0, round(n["fin"] - time.time()))) if n["fin"] else "-", n["auto"], n["plage"]))
         self.precedent.pop("CLIM", None)  # renvoie la ligne à l'ESP32 au prochain tour
 
     def boucle_lecture(self):
@@ -2592,10 +2625,12 @@ def main():
     else:
         print("[agent] serveur app indisponible : py -m pip install --user websockets")
     threading.Thread(target=agent.boucle_lecture, daemon=True).start()
+    atexit.register(agent.clim_eteinte_esp)  # Phase 14-bis : à l'arrêt, « CLIM off » part vers l'ESP32
     if args.service:
         while True:
             time.sleep(3600)
     agent.console()
+    agent.clim_eteinte_esp()
 
 
 if __name__ == "__main__":

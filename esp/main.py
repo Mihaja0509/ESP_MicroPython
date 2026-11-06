@@ -451,6 +451,10 @@ while True:
             etat["piece"] = None  # le capteur ne répond plus : l'écran n'affiche plus la pièce
         if etat["connecte"] and time.ticks_diff(maintenant, derniere_donnee) > ATTENTE_ABSENT:
             etat["connecte"] = False
+        # Phase 14-bis : plus aucune ligne CLIM depuis 2 min (PC arrêté, téléphone hors ligne…) :
+        # on efface l'état de la clim, le bandeau et les effets disparaissent
+        if etat["clim"] is not None and time.ticks_diff(maintenant, etat["clim"]["recu"]) > 120000:
+            etat["clim"] = None
         # écran noir : le PC s'est éteint après un arrêt annoncé, ou la carte vient de démarrer
         # sans heure (PC éteint : son port USB coupe et remet le courant de temps en temps)
         if etat["connecte"]:

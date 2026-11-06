@@ -7,6 +7,7 @@ import 'package:flutter/widgets.dart' show AppLifecycleListener;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+import 'clim_plan.dart' show ClimPlan;
 import 'etat.dart';
 
 const int portApp = 8765;
@@ -257,6 +258,8 @@ class Connexion extends ChangeNotifier {
         _envoyer({'type': 'apps'});
         _envoyer({'type': 'raccourcis'});
         _envoyer({'type': 'master'});
+        // Phase 14-bis : le PC vient (re)devenir joignable : il retrouve tout de suite l'état de la clim
+        ClimPlan.publier();
       case 'erreur':
         if (_authEnvoyee && statut != Statut.connecte) {
           // le PC ne reconnaît plus ce téléphone : il faut refaire l'appairage

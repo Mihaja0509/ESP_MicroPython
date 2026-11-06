@@ -33,6 +33,9 @@ object ClimPlan {
     const val CODE_FEN_ON = 103
     const val CODE_FEN_OFF = 104
     const val CODE_AUTO = 105
+    const val CODE_REPUB = 106                      // republication de l'état au PC (toutes les 30 s)
+    private const val REPUB_MS = 30_000L
+    private const val REPUB_RETENTE_MS = 10_000L    // l'agent n'a pas répondu : nouvelle tentative plus vite
 
     /**
      * Version de la partie Android, demandée par Dart (canal « version »). 2 = minuteur en SECONDES
@@ -98,8 +101,21 @@ object ClimPlan {
     fun eteindre(c: Context): Boolean {
         if (!allume(c)) return false
         if (!emettre(c, "m_power")) return false
-        p(c).edit().putBoolean("on", false).putLong("dernier_off", System.currentTimeMillis()).apply()
+        marquerEteinte(c)
         return true
+    }
+
+    /**
+     * La clim est considérée éteinte : on = false, plus de minuteur ni de phase automatique en cours
+     * (sinon le PC et l'ESP32 afficheraient une clim « fantôme » avec un reste de compte à rebours).
+     */
+    private fun marquerEteinte(c: Context) {
+        p(c).edit()
+            .putBoolean("on", false)
+            .putString("phase", "idle")
+            .putLong("minuteur_fin", 0)
+            .putLong("dernier_off", System.currentTimeMillis())
+            .apply()
     }
 
     // ------------------------------------------------------------------ alarmes
@@ -192,8 +208,15 @@ object ClimPlan {
         when (code) {
             CODE_MIN_OFF -> {
                 p(c).edit().putLong("minuteur_fin", 0).apply()
-                if (eteindre(c)) notifier(c, "Timer finished: AC turned off")
+                if (eteindre(c)) {
+                    notifier(c, "Timer finished: AC turned off")
+                } else {
+                    // IR impossible ou clim déjà supposée éteinte : le minuteur est fini quand même,
+                    // l'état passe à « off » et le PC l'apprend tout de suite
+                    marquerEteinte(c)
+                }
             }
+            CODE_REPUB -> Unit // rien à faire : la republication a lieu juste après
             CODE_MIN_ON -> if (allumer(c)) notifier(c, "Timer: AC turned on")
             CODE_FEN_ON -> {
                 if (allumer(c)) notifier(c, "Schedule: AC turned on")
@@ -205,7 +228,7 @@ object ClimPlan {
             }
             CODE_AUTO -> auto(c)
         }
-        publier(c)
+        publier(c, attendre = true) // dans le fil du récepteur : l'envoi finit avant la fin de l'alarme
     }
 
     /** Après un redémarrage du téléphone ou une mise à jour de l'app. */
@@ -225,23 +248,31 @@ object ClimPlan {
         pr.getString("auto", null)?.let {
             if (JSONObject(it).optBoolean("actif")) programmer(c, CODE_AUTO, maintenant + 30_000)
         }
+        publier(c) // relance la republication toutes les 30 s
     }
 
     // ------------------------------------------------------------------ pour l'app
     fun etat(c: Context): Map<String, Any> {
         val pr = p(c)
         val am = c.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        // clim éteinte : jamais de compte à rebours affiché (pas d'état figé)
         return mapOf(
             "on" to allume(c),
-            "minuteurFin" to pr.getLong("minuteur_fin", 0),
+            "minuteurFin" to (if (allume(c)) pr.getLong("minuteur_fin", 0) else 0L),
             "phase" to (pr.getString("phase", "idle") ?: "idle"),
             "autoFin" to pr.getLong("auto_fin", 0),
             "exact" to (Build.VERSION.SDK_INT < 31 || am.canScheduleExactAlarms()),
         )
     }
 
-    /** Dit au PC (agent) où en est la clim : il l'affiche sur l'écran de l'ESP32. Sans bloquer. */
-    fun publier(c: Context) {
+    /**
+     * Dit au PC (agent) où en est la clim : il l'affiche sur l'écran de l'ESP32.
+     * - [attendre] = false : l'envoi part dans un fil (appel depuis l'app) ; true : dans le fil courant.
+     * - Tant qu'il y a quelque chose à dire (clim allumée, minuteur, plage ou automatisme), une alarme
+     *   CODE_REPUB republie l'état toutes les 30 s (10 s si l'agent n'a pas répondu) : un PC allumé
+     *   après coup retrouve le minuteur en cours en moins de 30 s.
+     */
+    fun publier(c: Context, attendre: Boolean = false) {
         val fp = c.getSharedPreferences(VeilleurPC.PREFS, Context.MODE_PRIVATE)
         val adresse = fp.getString("flutter.adresse", "") ?: ""
         val token = fp.getString("flutter.token", "") ?: ""
@@ -251,8 +282,9 @@ object ClimPlan {
         val phase = pr.getString("phase", "idle") ?: "idle"
         var fin = pr.getLong("minuteur_fin", 0)
         if (fin <= maintenant && phase != "idle") fin = pr.getLong("auto_fin", 0)
-        // temps restant en SECONDES (Phase 14) : l'agent et l'ESP32 l'affichent en h:mm:ss / min
-        val reste = if (fin > maintenant) ((fin - maintenant + 999L) / 1_000L).toInt() else 0
+        // temps restant en SECONDES (Phase 14) : l'agent et l'ESP32 l'affichent en h:mm:ss / min.
+        // Clim éteinte : toujours 0 (jamais un reste de compte à rebours fantôme).
+        val reste = if (allume(c) && fin > maintenant) ((fin - maintenant + 999L) / 1_000L).toInt() else 0
         val mode = if (phase == "dry" && allume(c)) "dry" else (pr.getString("mode", "cool") ?: "cool")
         val auto = pr.getString("auto", null)?.let { JSONObject(it).optBoolean("actif") } ?: false
         // plage horaire active : « de-a » en minutes depuis minuit (ex. 1140-1260), sinon 0
@@ -260,13 +292,18 @@ object ClimPlan {
         val plage = if (f != null && f.optBoolean("actif")) "${f.optInt("de")}-${f.optInt("a")}" else "0"
         val chemin = "/clim_maj?on=${if (allume(c)) 1 else 0}&mode=$mode&temp=${pr.getInt("temp", 24)}" +
             "&reste=$reste&auto=${if (auto) 1 else 0}&plage=$plage"
-        Thread {
+        // y a-t-il quelque chose à republier ? sinon l'alarme de republication s'arrête
+        val besoin = allume(c) || reste > 0 || plage != "0" || auto
+        if (besoin) programmer(c, CODE_REPUB, maintenant + REPUB_MS) else annuler(c, CODE_REPUB)
+        val envoi = {
             try {
                 VeilleurPC.lire(adresse, token, chemin)
             } catch (e: Exception) {
-                // PC éteint ou injoignable : tant pis, l'écran de l'ESP32 n'est qu'un plus
+                // PC éteint ou injoignable : nouvelle tentative bientôt (plus vite que les 30 s)
+                if (besoin) programmer(c, CODE_REPUB, System.currentTimeMillis() + REPUB_RETENTE_MS)
             }
-        }.start()
+        }
+        if (attendre) envoi() else Thread { envoi() }.start()
     }
 
     // ------------------------------------------------------------------ automatisme (étape F)

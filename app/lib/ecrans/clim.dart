@@ -3,6 +3,8 @@
 // Chaque appui envoie la trame complète (mode, ventilation, température, swing).
 // Phase 13 : swing corrigé (bit 0 = swing actif) ; les trames sont aussi confiées à Android
 // (minuteur, plage horaire, automatisme) et l'état « allumée ? » est suivi (clim_plan.dart).
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -26,11 +28,36 @@ class _CarteClimState extends State<CarteClim> {
   int _temp = 24;
   bool _swing = false;
   String _info = "Point the phone's IR blaster at the AC, then tap a button.";
+  Map<String, dynamic> _rt = {}; // état réel côté Android, relu chaque seconde
+  Timer? _suivi;
+  Timer? _effacerInfo;
 
   @override
   void initState() {
     super.initState();
     _charger();
+    // Phase 14-bis : l'état affiché vient toujours de ClimPlan.etat, jamais d'un message figé
+    _suivi = Timer.periodic(const Duration(seconds: 1), (_) async {
+      final rt = await ClimPlan.etat();
+      if (mounted) setState(() => _rt = rt);
+    });
+  }
+
+  @override
+  void dispose() {
+    _suivi?.cancel();
+    _effacerInfo?.cancel();
+    super.dispose();
+  }
+
+  /// Affiche un message court (« Sent: power ») qui s'efface tout seul : il ne reste jamais
+  /// affiché alors que l'état a changé (minuteur fini, clim coupée à la main…).
+  void _annoncer(String texte) {
+    setState(() => _info = texte);
+    _effacerInfo?.cancel();
+    _effacerInfo = Timer(const Duration(seconds: 6), () {
+      if (mounted) setState(() => _info = '');
+    });
   }
 
   Future<void> _charger() async {
@@ -73,9 +100,7 @@ class _CarteClimState extends State<CarteClim> {
     HapticFeedback.selectionClick();
     final ok = await ClimIr.envoyer(octets);
     if (!mounted) return ok;
-    setState(
-      () => _info = ok ? 'Sent: $nom' : 'No IR blaster found on this phone.',
-    );
+    _annoncer(ok ? 'Sent: $nom' : 'No IR blaster found on this phone.');
     return ok;
   }
 
@@ -94,9 +119,7 @@ class _CarteClimState extends State<CarteClim> {
     final nouveau = e['on'] != true;
     await ClimPlan.setOn(nouveau);
     if (mounted) {
-      setState(
-        () => _info = 'Sent: power (AC now assumed ${nouveau ? 'ON' : 'OFF'})',
-      );
+      _annoncer('Sent: power (AC now assumed ${nouveau ? 'ON' : 'OFF'})');
     }
   }
 
@@ -210,10 +233,21 @@ class _CarteClimState extends State<CarteClim> {
             },
           ),
           const SizedBox(height: 10),
+          // état réel (relu chaque seconde) : « AC is ON • off in 0:09:50 » / « AC is OFF »
           Text(
-            _info,
-            style: const TextStyle(fontSize: 12, color: Couleurs.gris),
+            statutClim(_rt, DateTime.now().millisecondsSinceEpoch),
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              color: _rt['on'] == true ? Couleurs.cyan : Couleurs.gris,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
           ),
+          if (_info.isNotEmpty)
+            Text(
+              _info,
+              style: const TextStyle(fontSize: 12, color: Couleurs.gris),
+            ),
         ],
       ),
     );

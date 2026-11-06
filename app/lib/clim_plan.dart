@@ -133,6 +133,16 @@ String formaterReste(int secondes) {
   return (h: hh, m: mm, s: ss);
 }
 
+/// État de la clim affiché dans l'app, calculé à partir de l'état lu chez Android (ClimPlan.etat) :
+/// « AC is OFF », « AC is ON » ou « AC is ON • off in 0:09:50 ». Jamais de compte à rebours quand
+/// la clim est éteinte.
+String statutClim(Map<String, dynamic> rt, int maintenantMs) {
+  if (rt['on'] != true) return 'AC is OFF';
+  final fin = (rt['minuteurFin'] as num?)?.toInt() ?? 0;
+  final reste = fin > 0 ? ((fin - maintenantMs) / 1000).ceil() : 0;
+  return reste > 0 ? 'AC is ON • off in ${formaterReste(reste)}' : 'AC is ON';
+}
+
 /// null si la durée est valable, sinon le message à afficher.
 String? verifierDuree(int total) {
   if (total < 1) return 'Minimum 1 second';
@@ -172,7 +182,6 @@ class CarteClimPlan extends StatefulWidget {
 
 class _CarteClimPlanState extends State<CarteClimPlan> {
   Timer? _minuterie;
-  int _tic = 0;
   Map<String, dynamic> _rt =
       {}; // état côté Android : on, minuteurFin, phase, exact…
   int _duree = 30 * 60; // durée du minuteur en SECONDES (champs h / min / s)
@@ -195,17 +204,9 @@ class _CarteClimPlanState extends State<CarteClimPlan> {
   void initState() {
     super.initState();
     _charger();
-    // chaque seconde : le compte à rebours se met à jour ; toutes les 5 s : état lu chez Android
+    // chaque seconde : l'état est relu chez Android (jamais un état figé) et le compte à rebours suit
     _minuterie = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!mounted) return;
-      _tic++;
-      final fin = (_rt['minuteurFin'] as num?)?.toInt() ?? 0;
-      final fini = fin > 0 && fin <= DateTime.now().millisecondsSinceEpoch;
-      if (_tic % 5 == 0 || fini) {
-        _rafraichir();
-      } else if (fin > 0) {
-        setState(() {});
-      }
+      if (mounted) _rafraichir();
     });
   }
 
@@ -290,9 +291,8 @@ class _CarteClimPlanState extends State<CarteClimPlan> {
     final erreur = verifierDuree(_duree);
     if (erreur != null) return;
     if (!_natifAJour) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text(_messageNatifAncien)),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text(_messageNatifAncien)));
       return;
     }
     HapticFeedback.selectionClick();
