@@ -110,7 +110,9 @@ class Carte extends StatelessWidget {
             ? [BoxShadow(color: Couleurs.cyan.withValues(alpha: 0.25), blurRadius: 18)]
             : const [],
       ),
-      child: child,
+      // Material transparent : les ListTile / SwitchListTile de la carte peignent leur fond et
+      // leurs effets ici, et non sous le fond de la carte (sinon Flutter lève une assertion).
+      child: Material(type: MaterialType.transparency, child: child),
     );
   }
 }

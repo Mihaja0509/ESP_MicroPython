@@ -5,6 +5,7 @@ import struct
 import time
 
 import framebuf
+import micropython
 from machine import PWM, SPI, Pin
 
 LARGEUR_PANNEAU = 172
@@ -29,6 +30,17 @@ CYAN = couleur(0, 200, 255)
 ORANGE = couleur(255, 140, 0)
 
 
+@micropython.viper
+def _retourner(src: ptr16, dst: ptr16, n: int):
+    """Copie n pixels RGB565 de src vers dst dans l'ordre inverse (rotation de 180°), ~2 ms."""
+    i = 0
+    j = n - 1
+    while i < n:
+        dst[j] = src[i]
+        i += 1
+        j -= 1
+
+
 class Ecran:
     def __init__(self, paysage=True, demi_tour=False):
         self.spi = SPI(1, baudrate=40_000_000, polarity=0, phase=0,
@@ -44,6 +56,7 @@ class Ecran:
         else:
             self.largeur, self.hauteur = LARGEUR_PANNEAU, HAUTEUR_PANNEAU
         self.tampon = bytearray(self.largeur * self.hauteur * 2)
+        self.tampon_retourne = bytearray(len(self.tampon)) if self.demi_tour else None
         self.fb = framebuf.FrameBuffer(self.tampon, self.largeur, self.hauteur,
                                        framebuf.RGB565)
         self._lettre = bytearray(8)
@@ -80,20 +93,19 @@ class Ecran:
         time.sleep_ms(50)
 
     def _madctl(self):
-        if self.paysage:
-            madctl = 0xA0 if self.demi_tour else 0x60
-        else:
-            madctl = 0xC0 if self.demi_tour else 0x00
+        # Phase 14 : l'orientation du contrôleur ne change plus. Le retournement de 180° se fait
+        # sur le tampon, dans afficher() (le MADCTL 0xA0 / 0xC0 n'avait aucun effet visible).
+        madctl = 0x60 if self.paysage else 0x00
         if BGR:
             madctl |= 0x08
         self._cmd(0x36, bytes([madctl]))
 
     def tourner(self, demi_tour):
-        """Retourne l'image de 180° sans toucher au tampon (les marges de 34 px sont symétriques)."""
-        demi_tour = bool(demi_tour)
-        if demi_tour != self.demi_tour:
-            self.demi_tour = demi_tour
-            self._madctl()
+        """Retourne l'image de 180° : les pixels du tampon sont envoyés dans l'ordre inverse
+        (les marges de 34 px de l'écran sont symétriques)."""
+        self.demi_tour = bool(demi_tour)
+        if self.demi_tour and self.tampon_retourne is None:
+            self.tampon_retourne = bytearray(len(self.tampon))
 
     # --- usage -------------------------------------------------------------
     def luminosite(self, pourcent):
@@ -109,7 +121,11 @@ class Ecran:
             y0, y1 = 0, self.hauteur - 1
         self._cmd(0x2A, struct.pack(">HH", x0, x1))
         self._cmd(0x2B, struct.pack(">HH", y0, y1))
-        self._cmd(0x2C, self.tampon)
+        if self.demi_tour:
+            _retourner(self.tampon, self.tampon_retourne, self.largeur * self.hauteur)
+            self._cmd(0x2C, self.tampon_retourne)
+        else:
+            self._cmd(0x2C, self.tampon)
 
     def texte(self, s, x, y, c, taille=1):
         """Texte avec la police 8x8 intégrée, agrandie `taille` fois."""

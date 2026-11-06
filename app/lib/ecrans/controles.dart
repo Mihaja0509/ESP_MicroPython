@@ -150,18 +150,23 @@ class _EcranControlesState extends State<EcranControles> {
                 color: Couleurs.gris,
               ),
               const SizedBox(width: 8),
-              const Text(
-                'ESP32 orientation',
-                style: TextStyle(color: Couleurs.doux),
+              const Expanded(
+                child: Text(
+                  'ESP32 orientation',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: Couleurs.doux),
+                ),
               ),
-              const Spacer(),
               ChoiceChip(
+                visualDensity: VisualDensity.compact,
                 label: const Text('Normal'),
                 selected: e.rotEsp != 180,
                 onSelected: (_) => _envoyer('ROT_ESP 0'),
               ),
               const SizedBox(width: 6),
               ChoiceChip(
+                visualDensity: VisualDensity.compact,
                 label: const Text('Flipped'),
                 selected: e.rotEsp == 180,
                 onSelected: (_) => _envoyer('ROT_ESP 180'),
