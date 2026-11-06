@@ -121,6 +121,14 @@ Téléphone (IR + alarmes Android) ── HTTP :8765 ──> agent PC ──USB 
 - **Tests** : Python `cd tools\agent` puis `py -X utf8 -m unittest test_historique` ; Dart `flutter test` (`clim_plan_test.dart`, `historique_test.dart`).
 - **Copie sur la carte** : fichier par fichier (`fs cp esp/main.py :main.py`, `fs cp esp/lib/ui.py :lib/ui.py`) ; une copie groupée `fs cp a b :` dépose tout à la racine.
 
+## Phase 14-bis : correctifs (minuteur, clim fantôme, capteur, écran)
+
+- **Hot reload ≠ Kotlin** : un rechargement à chaud (`flutter run`, touche `r`) ne met à jour que le Dart. Après toute modification de `ClimPlan.kt` / `MainActivity.kt`, **réinstaller l'APK**. Le canal `dadou/clim` a une version (`ClimPlan.VERSION`, méthode `version`) : si la partie Android est trop ancienne, la carte « AC timer & automation » refuse de lancer le minuteur (avertissement rouge). Unité du minuteur : **secondes de bout en bout** (`minuteur {secondes, delaiSecondes}`).
+- **État clim** : `ClimPlan` met `on = false`, `reste = 0` et publie tout de suite quand le minuteur expire (même si l'IR échoue) ; il republie l'état toutes les 30 s (10 s après un échec) tant qu'il y a quelque chose à dire (alarme `CODE_REPUB`) et à chaque reconnexion WebSocket de l'app. L'app lit `ClimPlan.etat` chaque seconde (`statutClim`). Agent : 90 s sans `/clim_maj` → `CLIM 0 …` vers l'ESP32 (aussi à l'arrêt de l'agent), une ligne `[agent] clim : …` par changement dans agent.log. ESP32 : état clim effacé après 120 s sans ligne `CLIM`.
+- **Capteur** : `capteur.py` retente l'initialisation toutes les 10 s, réinitialise le bus après 3 échecs de suite, ne lève jamais d'exception, ne renvoie jamais une mesure de plus de 60 s. Sans mesure : « --° » sur l'ESP32, « Room: -- °C · -- % » dans l'app. agent.log : `[agent] capteur : mesures reçues …` / `plus de mesure depuis 30 s`. Test : `py -X utf8 tools\test_capteur.py` (faux bus I2C). Diagnostic câblage : `adc_survey` (tension de chaque GPIO avec pull-down) — un fil SCL/SDA branché est tiré à ~3,0 V par le module.
+- **Scène normale** : le bloc température / humidité est collé à l'heure réelle (largeur de `f_heure`), 12 px de marge avant le bord droit de la carte (`CARTE_DROITE = 185`), police la plus grande qui tient. `tools/render_scenes.py` contient les scénarios pire cas (00:00, 100 %) et contrôle la marge.
+- **Tests** : `cd tools\agent` puis `py -X utf8 -m unittest test_clim_agent test_historique` ; Dart : `minuteur_canal_test.dart`, `statut_clim_test.dart`.
+
 ## Règles
 
 1. Appliquer **exactement** les documents de `docs\`.

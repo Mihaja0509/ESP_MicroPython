@@ -26,7 +26,7 @@ La chaîne bouton → agent → ESP32 fonctionnait : `ROT_ESP 180` répond `OK` 
 
 ## Écran (banc de rendu)
 
-`py -X utf8 tools\render_scenes.py` : 29 aperçus dans `tools/assets/apercus/scene_*.png` (normal, calme, nuit, jeu ; avec et sans clim, plusieurs instants), 0 chevauchement de texte détecté. Largeurs réelles : `f_heure` « 88:88 » = 117 px (de x=16 à 133), `f_m` « 24.1° » = 37 px, bord droit de la carte x=190.
+`py -X utf8 tools\render_scenes.py` : 37 aperçus dans `tools/assets/apercus/scene_*.png` (normal, calme, nuit, jeu ; avec et sans clim, plusieurs instants), 0 chevauchement de texte détecté. Largeurs réelles : `f_heure` « 88:88 » = 117 px (de x=16 à 133), `f_m` « 24.1° » = 37 px, bord droit de la carte x=190.
 
 ## Historique de jeu
 
@@ -46,6 +46,25 @@ La chaîne bouton → agent → ESP32 fonctionnait : `ROT_ESP 180` répond `OK` 
 - Capteur : le brochage utilisé est **SDA = GPIO7, SCL = GPIO6** (seule paire qui répond au scan, AHT20 `0x38` et BMP280 `0x77`), pas GPIO2 / GPIO5. `capteur.py` n'a pas été modifié en Phase 14.
 - `dart format` n'a été appliqué qu'aux fichiers neufs : sur les fichiers existants il reformate tout le fichier (gros diff sans rapport).
 - Le banc de rendu a installé `numpy` et `pillow` pour `py` (Python 3.13 de la tâche planifiée).
+
+## Phase 14-bis (correctifs)
+
+| Étape | Commit | Contenu |
+|---|---|---|
+| 14b.1 | `bf3ffbc` | minuteur : secondes de bout en bout + contrôle de version Android ↔ Dart |
+| 14b.2 | `dd95f4c` | plus d'état clim fantôme (Android, app, agent, ESP32) |
+| 14b.3 | `ef49abe` | capteur : lecture robuste, « -- » sans mesure |
+| 14b.4 | `0be5ff3` | scène normale : température / humidité collées à l'heure, marge de 12 px |
+| 14b.5 | voir `git log` | documentation |
+
+**Causes**
+- Minuteur « 10 s devient 10 min » : l'APK du téléphone datait de 19:04, avant le minuteur h/min/s (commit de 19:28). Un rechargement à chaud met à jour le Dart seul : Dart envoyait 10 (secondes), le Kotlin installé le lisait en minutes (alarme `dadou.clim.101` programmée à +10 min, relevée avec `adb shell dumpsys alarm`). Aucune conversion ×60 résiduelle dans le code actuel. Garde-fou : version du canal (`ClimPlan.VERSION = 2`).
+- État fantôme : à l'expiration, `eteindre()` ne mettait l'état à off que si l'IR partait, une phase automatique laissait un `reste` périmé, et rien ne republiait ni ne péremptait l'état côté PC / ESP32.
+- Température / humidité absentes : le fil **SCL (GPIO6) ne fait plus contact** (GPIO6 lit 8 mV avec son pull-down, contre 3,0 V quand le module est branché ; GPIO7/SDA est toujours tiré à 3,0 V) ; en plus, l'ancien code ne retentait jamais l'initialisation après un échec au démarrage. Ce n'est pas GPIO2 / GPIO5 : aucun rappel du module n'y est vu.
+
+**Vérifications faites** : tests Dart (minuteur 10 s → 10, 1 h 2 min 3 s → 3723, version Android trop ancienne, `statutClim`), tests Python agent (13), `tools/test_capteur.py` (6, faux bus I2C), banc de rendu (37 aperçus, pire cas `00:00` / 100 %, 0 chevauchement, marge de 12 px), carte : empreintes identiques, `erreur.txt` absent, lignes `CLIM` / message `CAPTEUR` jouées, carte vivante après 130 s sans ligne `CLIM`. APK release installé sur le téléphone (`adb install -r`, 20:13).
+
+**Non vérifié (téléphone verrouillé)** : l'alarme Android réelle à 10 s, la coupure de la clim et l'effacement sur l'ESP32 en moins de 5 s, et le test « PC éteint, minuteur lancé, PC rallumé ». Procédure : déverrouiller, ouvrir Controls, saisir 0 / 0 / 10, « Run for 0:00:10 » ; agent.log doit montrer `[agent] clim : on …, minuteur 10 s` puis, dix secondes plus tard, `[agent] clim : off …`. Pour le PC éteint : `Stop-ScheduledTask "ESP32 Telecommande Agent"`, lancer un minuteur de 3 min, attendre 40 s, `Start-ScheduledTask` : une ligne `clim : on … minuteur <n> s` doit apparaître en moins de 30 s.
 
 ## À faire à la main
 
