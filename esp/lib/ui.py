@@ -125,6 +125,17 @@ def reste_court(secondes):
     return "%d s" % secondes
 
 
+def reste_mini(secondes):
+    """Pour le coin des scènes discrètes : 3900 -> « 1h05 », 1380 -> « 23m », 400 -> « 6:40 », 45 -> « 45s »."""
+    if secondes >= 3600:
+        return "%dh%02d" % (secondes // 3600, (secondes % 3600) // 60)
+    if secondes >= 600:
+        return "%dm" % min(59, (secondes + 59) // 60)
+    if secondes >= 60:
+        return "%d:%02d" % (secondes // 60, secondes % 60)
+    return "%ds" % secondes
+
+
 class Interface:
     def __init__(self, ecran):
         self.ecran = ecran
@@ -306,7 +317,7 @@ class Interface:
         elif mode == "master":
             self._scene_master(etat, carte, maintenant)
         else:
-            self._scene_nuit(etat, carte, mode)
+            self._scene_nuit(etat, carte, mode, maintenant)
         self._mascotte(etat, mode, t, maintenant)
         self._bandeau(maintenant)
         self.ecran.afficher()
@@ -468,18 +479,40 @@ class Interface:
         return c if c and c["on"] else None
 
     def _texte_clim(self, etat, maintenant):
-        """« AC Cool 24° • off in 23 min • auto », ou None si la clim est éteinte / inconnue."""
-        c = self._clim_actif(etat)
+        """Bandeau de la clim, ou None quand il n'y a rien à dire (clim éteinte, ni minuteur ni plage).
+        Allumée : « AC Cool 24° • 23 min • auto ». Éteinte avec une plage horaire : « AC off • 19:00-21:00 »."""
+        c = etat.get("clim")
         if not c:
             return None
-        noms = {"cool": "Cool", "dry": "Dry", "fan": "Fan", "auto": "Auto"}
-        texte = "AC %s %d°" % (noms.get(c["mode"], "Cool"), c["temp"])
         reste = c["reste"] - time.ticks_diff(maintenant, c["recu"]) // 1000
-        if c["reste"] > 0 and reste > 0:
-            texte += " • off in %s" % reste_court(reste)
+        minuteur = c["reste"] > 0 and reste > 0
+        if c["on"]:
+            noms = {"cool": "Cool", "dry": "Dry", "fan": "Fan", "auto": "Auto"}
+            texte = "AC %s %d°" % (noms.get(c["mode"], "Cool"), c["temp"])
+            if minuteur:
+                texte += " • %s" % reste_court(reste)
+        elif c.get("plage") or minuteur:
+            texte = "AC off"
+            if c.get("plage"):
+                texte += " • %02d:%02d-%02d:%02d" % (c["plage"][0] // 60, c["plage"][0] % 60,
+                                                    c["plage"][1] // 60, c["plage"][1] % 60)
+        else:
+            return None
         if c["auto"]:
             texte += " • auto"
         return texte
+
+    def _ac_mini(self, etat, maintenant):
+        """Très court, pour le coin des scènes discrètes : « AC 24° », « AC 23m » (minuteur), « AC off »."""
+        c = etat.get("clim")
+        if not c:
+            return None
+        if not c["on"]:
+            return "AC off"
+        reste = c["reste"] - time.ticks_diff(maintenant, c["recu"]) // 1000
+        if c["reste"] > 0 and reste > 0:
+            return "AC " + reste_mini(reste)
+        return "AC %d°" % c["temp"]
 
     def _texte_piece(self, etat):
         piece = etat.get("piece")
@@ -487,34 +520,44 @@ class Interface:
             return None
         return "Room %.1f° • %d %%" % (piece[0], piece[1])
 
-    def _coin_clim(self, etat, carte, y=8):
-        """Coin haut droit : état de la clim (AC 24°) et climat de la pièce (24.1° 58 %)."""
+    def _coin_clim(self, etat, carte, y=8, discret=False, maintenant=0):
+        """À droite de l'heure : température et humidité de la pièce, en permanence (« --° » sans mesure).
+        discret=True (scènes calme et nuit) : plus petit, avec l'état de la clim en dessous."""
         fb = self.fb
-        libre = 186 - (16 + self.f_heure.largeur("88:88") + 10)  # place à droite de l'heure
-        c = etat.get("clim")
-        if c:
-            texte = ("AC %d°" % c["temp"]) if c["on"] else "AC off"
-            if self.f_s.largeur(texte) <= libre:
-                self.f_s.ecrire(fb, texte, 186 - self.f_s.largeur(texte), y + 2,
-                                CYAN if c["on"] else GRIS, carte)
         piece = etat.get("piece")
+        droite = 186
+        if not discret:
+            texte = ("%.1f°" % piece[0]) if piece else "--°"
+            self.f_m.ecrire(fb, texte, droite - self.f_m.largeur(texte), y + 2,
+                            BLANC if piece else GRIS, carte)
+            if piece:
+                texte = "%d %%" % piece[1]
+                self.f_m.ecrire(fb, texte, droite - self.f_m.largeur(texte), y + 24, DOUX, carte)
+            return
+        texte = ("%.1f°" % piece[0]) if piece else "--°"
+        self.f_s.ecrire(fb, texte, droite - self.f_s.largeur(texte), y + 2, DOUX if piece else GRIS, carte)
         if piece:
-            texte = "%.1f° %d %%" % (piece[0], piece[1])
-            if self.f_xs.largeur(texte) <= libre:
-                self.f_xs.ecrire(fb, texte, 186 - self.f_xs.largeur(texte), y + 22, DOUX, carte)
+            texte = "%d %%" % piece[1]
+            self.f_xs.ecrire(fb, texte, droite - self.f_xs.largeur(texte), y + 19, GRIS, carte)
+        ac = self._ac_mini(etat, maintenant)
+        if ac:
+            self.f_xs.ecrire(fb, ac, droite - self.f_xs.largeur(ac), y + 34,
+                             CYAN if ac != "AC off" else GRIS, carte)
+
+    def _bandeau_clim(self, texte, y, carte):
+        """Petite ligne discrète avec l'icône thermomètre (ligne du bas de la scène)."""
+        self.fb.blit(self.icones["thermo"], 14, y - 2, CLE)
+        self.f_xs.ecrire(self.fb, self.f_xs.couper(texte, 148), 36, y,
+                         CYAN if not texte.startswith("AC off") else GRIS, carte)
 
     def _ligne_bas(self, etat, carte, maintenant):
-        """Ligne du bas de la scène normale : PC (batterie, casque), puis clim et pièce
-        quand il y en a, en alternance toutes les 5 s."""
-        extras = [t for t in (self._texte_clim(etat, maintenant), self._texte_piece(etat)) if t]
-        phase = (maintenant // 5000) % (1 + len(extras))
-        if phase == 0:
+        """Ligne du bas de la scène normale : PC (batterie, casque). Quand la clim est allumée ou
+        programmée, le bandeau « AC … » prend la place une fois sur deux (toutes les 5 s)."""
+        texte = self._texte_clim(etat, maintenant)
+        if texte is None or (maintenant // 5000) % 2 == 0:
             self._ligne_bas_pc(etat, carte)
             return
-        texte = extras[phase - 1]
-        self.fb.blit(self.icones["thermo"], 14, 145, CLE)
-        self.f_xs.ecrire(self.fb, self.f_xs.couper(texte, 150), 36, 147,
-                         CYAN if texte.startswith("AC") else DOUX, carte)
+        self._bandeau_clim(texte, 147, carte)
 
     def _ligne_bas_pc(self, etat, carte):
         fb = self.fb
@@ -844,7 +887,7 @@ class Interface:
     def _scene_calme(self, etat, carte, maintenant):
         fb = self.fb
         self._heure_date(carte)
-        self._coin_clim(etat, carte)
+        self._coin_clim(etat, carte, discret=True, maintenant=maintenant)
         liste = self._suggestions(etat)
         icone, texte = liste[(self._age(self.base_depuis, maintenant) // SUGGESTION_MS) % len(liste)]
         self.bulle_calme = icone
@@ -860,12 +903,16 @@ class Interface:
             self.f_s.ecrire(fb, l, 52, y, BLANC, carte)
             y += 16
         minutes = etat["evt"].get("inactif", 0)
-        self.f_xs.ecrire(fb, "No activity for %s" % duree_texte(max(1, minutes)), 16, 148, GRIS, carte)
+        ac = self._texte_clim(etat, maintenant)
+        if ac and (maintenant // 5000) % 2 == 1:
+            self._bandeau_clim(ac, 148, carte)
+        else:
+            self.f_xs.ecrire(fb, "No activity for %s" % duree_texte(max(1, minutes)), 16, 148, GRIS, carte)
 
-    def _scene_nuit(self, etat, carte, mode):
+    def _scene_nuit(self, etat, carte, mode, maintenant=0):
         fb = self.fb
         self._heure_date(carte, y_heure=4)
-        self._coin_clim(etat, carte, y=4)
+        self._coin_clim(etat, carte, y=4, discret=True, maintenant=maintenant)
         titre = "PC locked" if mode == "verrou" else "PC asleep"
         self.f_xs.ecrire(fb, titre, 120, 58, GRIS, carte)
         jours = etat.get("meteo") or []
