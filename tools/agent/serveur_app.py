@@ -33,6 +33,7 @@ Messages (JSON, un par message) :
     {"type": "master_maj", "master": {…partie des réglages…}} -> rep (ligne « master_maj ») + master
     {"type": "master_afficher"} -> rep : la scène master s'affiche 15 s sur l'ESP32
     {"type": "jeux"} -> {"type": "jeux", stats, semaine, jeux, pas_des_jeux, en_cours}
+    {"type": "historique"} -> {"type": "historique", aujourdhui, jours: [{date, s, jeux: [...]}]} (Phase 14)
     {"type": "jeux_maj", "jeux": [...], "pas_des_jeux": [...]} et {"type": "pas_un_jeu"} -> rep + jeux
 
 Widget Android (Phase 8) : requête HTTP simple sur le même port, sans WebSocket :
@@ -307,6 +308,8 @@ class ServeurApp:
                     await self._envoyer(ws, {"type": "rep", "ligne": typ, "texte": texte, "ok": ok})
                 elif typ == "jeux":
                     await self._envoyer(ws, {"type": "jeux", **(await self._appel("jeux"))})
+                elif typ == "historique":
+                    await self._envoyer(ws, {"type": "historique", **(await self._appel("historique"))})
                 elif typ in ("jeux_maj", "pas_un_jeu"):
                     if typ == "jeux_maj":
                         ok, texte = await boucle.run_in_executor(

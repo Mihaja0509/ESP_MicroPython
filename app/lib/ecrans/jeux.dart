@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../connexion.dart';
 import '../theme.dart';
+import 'historique_jeux.dart';
 import 'master.dart' show duree;
 
 class EcranJeux extends StatefulWidget {
@@ -66,6 +67,8 @@ class _EcranJeuxState extends State<EcranJeux> {
                   const SizedBox(height: 14),
                 ],
                 _carteSemaine(semaine),
+                const SizedBox(height: 14),
+                _carteHistorique(),
                 const SizedBox(height: 14),
                 _carteStats(stats),
                 const SizedBox(height: 14),
@@ -150,6 +153,30 @@ class _EcranJeuxState extends State<EcranJeux> {
                     ),
                   ),
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Accès à l'historique détaillé (jours, par jeu, barres 7 / 30 jours) : Phase 14.
+  Widget _carteHistorique() {
+    return Carte(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Titre('Play history', icone: Icons.history_rounded),
+          const Text(
+            'Every day and every game: time, sessions, FPS, temperatures, load.',
+            style: TextStyle(color: Couleurs.gris, fontSize: 12),
+          ),
+          const SizedBox(height: 10),
+          FilledButton.icon(
+            icon: const Icon(Icons.open_in_new_rounded),
+            label: const Text('Open history'),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => EcranHistoriqueJeux(cx: cx)),
             ),
           ),
         ],

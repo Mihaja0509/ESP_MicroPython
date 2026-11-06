@@ -42,7 +42,8 @@ pc = PC()
 # Valeurs envoyées par le programme PC (agent_pc.py) ; -1 = inconnu
 stat = {"cpu": -1, "ram": -1, "vol": -1, "bat": -1, "chg": 0}
 gpu = {"temp": -1, "charge": -1, "vram": -1}
-perf = {"cpu_temp": -1, "fps": -1, "total": -1}   # total : minutes passées sur le jeu en cours
+perf = {"cpu_temp": -1, "fps": -1, "total": -1,   # total : minutes passées sur le jeu en cours
+        "jour_total": -1, "jour_jeu": -1}         # Phase 14 : minutes jouées aujourd'hui (tous jeux / ce jeu)
 evt = {"casque": "", "manette": 0, "verrou": 0, "jeu": "", "video": "", "video_titre": "",
        "inactif": 0, "video_pos": None}  # video_pos : (position s, durée s, lecture 0/1, ticks reçu)
 etat = {"connecte": False, "stat": stat, "gpu": gpu, "perf": perf, "evt": evt, "meteo": [],
@@ -209,7 +210,8 @@ def executer(ligne):
         etat["meteo"] = liste
         return "OK"
     # --- données du programme PC -------------------------------------------
-    if cmd in ("STAT", "GPU", "PERF", "EVT", "TEMPS", "METEO_J", "JEU_TOTAL", "MASTER", "MASTER_INFO"):
+    if cmd in ("STAT", "GPU", "PERF", "EVT", "TEMPS", "METEO_J", "JEU_TOTAL", "JEU_JOUR", "MASTER",
+               "MASTER_INFO"):
         maintenant = time.ticks_ms()
         if not etat["connecte"]:
             if debut_flux is None or time.ticks_diff(maintenant, derniere_donnee) > 3000:
@@ -257,6 +259,13 @@ def executer(ligne):
             perf["total"] = int(arg)
         except ValueError:
             return "ERR utilise : JEU_TOTAL minutes"
+        return "OK"
+    if cmd == "JEU_JOUR":
+        # JEU_JOUR total_du_jour jeu_du_jour (minutes) : temps joué aujourd'hui, tous jeux / ce jeu
+        try:
+            perf["jour_total"], perf["jour_jeu"] = [int(x) for x in arg.split()][:2]
+        except ValueError:
+            return "ERR utilise : JEU_JOUR total jeu"
         return "OK"
     if cmd == "TEMPS":
         try:

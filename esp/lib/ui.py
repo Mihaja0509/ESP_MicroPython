@@ -764,6 +764,12 @@ class Interface:
         if len(self.hist_fps) >= 10:
             moyenne = sum(self.hist_fps) // len(self.hist_fps)
             textes.append("1 min: min %d  •  avg %d FPS" % (min(self.hist_fps), moyenne))
+        jt, jj = etat["perf"].get("jour_total", -1), etat["perf"].get("jour_jeu", -1)
+        if jt >= 1:  # Phase 14 : « Today: 3h 12 • this game 1h 40 » (le jeu seul s'il est le seul joué)
+            if 1 <= jj < jt:
+                textes.append("Today: %s • this game %s" % (duree_texte(jt), duree_texte(jj)))
+            else:
+                textes.append("Today: %s" % duree_texte(jt))
         total = etat["perf"].get("total", -1)
         if total >= 1:
             textes.append("Game total: %s" % duree_texte(total))

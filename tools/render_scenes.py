@@ -250,7 +250,7 @@ def scenarios():
     def jeu(**kw):
         e = normal(**kw)
         e["evt"] = dict(e["evt"], jeu="God of War Ragnarok")
-        e["perf"] = {"cpu_temp": 68, "fps": 87, "total": 312}
+        e["perf"] = {"cpu_temp": 68, "fps": 87, "total": 312, "jour_total": 192, "jour_jeu": 100}
         e["gpu"] = {"temp": 71, "charge": 94, "vram": 6}
         return e
     liste.append(("jeu_sans_clim", lambda: jeu(), (1000, 6000, 11000, 16000, 21000, 26000)))

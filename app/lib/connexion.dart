@@ -122,6 +122,7 @@ class Connexion extends ChangeNotifier {
   /// Phase 11 : données de l'onglet Master et de la page « Mes jeux » (null = pas encore reçues).
   Map<String, dynamic>? master;
   Map<String, dynamic>? jeux;
+  Map<String, dynamic>? historique; // Phase 14 : historique de jeu par jour
   Map<String, dynamic>? sites; // Phase 11-bis
   int _masterV = -1;
 
@@ -314,6 +315,9 @@ class Connexion extends ChangeNotifier {
       case 'jeux':
         jeux = Map<String, dynamic>.from(m);
         return true;
+      case 'historique':
+        historique = Map<String, dynamic>.from(m);
+        return true;
     }
     return false;
   }
@@ -378,6 +382,8 @@ class Connexion extends ChangeNotifier {
   Future<(bool, String)> afficherMaster() => _demander({'type': 'master_afficher'});
 
   void demanderJeux() => _envoyer({'type': 'jeux'});
+
+  void demanderHistorique() => _envoyer({'type': 'historique'});
 
   Future<(bool, String)> majJeux(List<String> jeux, List<String> pasDesJeux) =>
       _demander({'type': 'jeux_maj', 'jeux': jeux, 'pas_des_jeux': pasDesJeux});

@@ -91,6 +91,7 @@ except ImportError:  # websockets pas installé
 
 from master import SuiviMaster  # Phase 11 : suivi du master
 from media_windows import LecteurMedia  # Phase 11-bis : position de la vidéo
+from historique import Historique  # Phase 14 : historique de jeu par jour et par jeu
 
 DOSSIER = Path(__file__).resolve().parent
 FICHIER_APPS = DOSSIER / "apps.json"
@@ -899,12 +900,15 @@ class StatsJeux:
             d = {}
         self.jeux = d.get("jeux") if isinstance(d.get("jeux"), dict) else {}
         self.jours = d.get("jours") if isinstance(d.get("jours"), dict) else {}
+        # Phase 14 : historique détaillé (sessions, FPS, températures…) ; les anciens « jours » y sont repris
+        self.hist = Historique(d.get("historique"), d.get("totaux"), self.jours)
         self.en_cours = ""
         self.dernier = 0.0
         self.sauve = time.time()
 
-    def compter(self, jeu, fps):
-        """Ajoute le temps écoulé au jeu en cours. Renvoie son temps total en minutes (-1 si aucun jeu)."""
+    def compter(self, jeu, fps, cpu_temp=None, gpu_temp=None, gpu_charge=None, ram=None):
+        """Ajoute le temps écoulé au jeu en cours (et les mesures de la seconde à l'historique du jour).
+        Renvoie son temps total en minutes (-1 si aucun jeu)."""
         maintenant = time.time()
         ecart = min(5.0, maintenant - self.dernier) if self.dernier else 0.0
         self.dernier = maintenant
@@ -915,29 +919,33 @@ class StatsJeux:
             return -1
         j = self.jeux.setdefault(jeu, {"secondes": 0, "sessions": 0, "fps_total": 0, "fps_n": 0,
                                        "dernier": ""})
+        jour = time.strftime("%Y-%m-%d")
         if jeu != self.en_cours:
             self.en_cours = jeu
             j["sessions"] = j.get("sessions", 0) + 1
+            self.hist.session(jour, jeu)
             ecart = 0.0
         j["secondes"] = j.get("secondes", 0) + ecart
         if fps is not None and fps > 0:
             j["fps_total"] = j.get("fps_total", 0) + fps
             j["fps_n"] = j.get("fps_n", 0) + 1
-        jour = time.strftime("%Y-%m-%d")
         j["dernier"] = jour
         du_jour = self.jours.setdefault(jour, {})
         du_jour[jeu] = du_jour.get(jeu, 0) + ecart
+        self.hist.echantillon(jour, jeu, ecart, fps, cpu_temp, gpu_temp, gpu_charge, ram)
         if maintenant - self.sauve > 60:
             self.sauver()
         return int(j["secondes"] // 60)
 
     def sauver(self):
         self.sauve = time.time()
-        for vieux in sorted(self.jours)[:-60]:  # garde les 60 derniers jours
+        for vieux in sorted(self.jours)[:-365]:  # garde les 365 derniers jours
             del self.jours[vieux]
+        self.hist.elaguer()
         donnees = {"jeux": {n: {k: (round(v, 1) if isinstance(v, float) else v) for k, v in j.items()}
                             for n, j in self.jeux.items()},
-                   "jours": {d: {n: round(s) for n, s in js.items()} for d, js in self.jours.items()}}
+                   "jours": {d: {n: round(s) for n, s in js.items()} for d, js in self.jours.items()},
+                   **self.hist.vers_dict()}
         try:
             tmp = FICHIER_STATS.with_suffix(".tmp")
             tmp.write_text(json.dumps(donnees, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -2187,10 +2195,20 @@ class Agent:
                 if cle != "INACTIF" or valeur in ("0", str(INACTIF_APRES // 60)):
                     print(f"[agent] événement : {cle} = {valeur}")
         # temps total passé sur le jeu en cours (minutes), affiché par l'ESP32 en mode jeu
-        total = self.stats.compter(jeu, self.donnees.get("fps", -1))
+        total = self.stats.compter(jeu, self.donnees.get("fps", -1), self.donnees.get("cpu_temp"),
+                                   self.donnees.get("gpu_temp"), self.donnees.get("gpu_charge"),
+                                   self.donnees.get("ram"))
         if jeu and self.precedent.get("JEU_TOTAL") != total:
             self.precedent["JEU_TOTAL"] = total
             self.liaison.envoyer(f"JEU_TOTAL {total}")
+        # Phase 14 : temps du jour (tous jeux) et de ce jeu, en minutes (repart de zéro à minuit)
+        if jeu:
+            jour = time.strftime("%Y-%m-%d")
+            ligne = "JEU_JOUR %d %d" % (self.stats.hist.total_jour(jour) // 60,
+                                        self.stats.hist.secondes_jeu(jour, jeu) // 60)
+            if self.precedent.get("JEU_JOUR") != ligne:
+                self.precedent["JEU_JOUR"] = ligne
+                self.liaison.envoyer(ligne)
         # Phase 11 : suivi du master (appli au premier plan, échéances, mesures…)
         hwnd, pid = fenetre_premier_plan()
         exe = titre = ""
@@ -2328,6 +2346,10 @@ class Agent:
                 "en_cours": {"nom": "" if p.get("JEU", "-") == "-" else p.get("JEU"),
                              "exe": self.jeux.exe}}
 
+    def historique_pour_app(self):
+        """Historique de jeu par jour et par jeu (écran « Play history » de l'app)."""
+        return self.stats.hist.pour_app(time.strftime("%Y-%m-%d"))
+
     def jeux_maj(self, jeux, pas):
         """Enregistre tools\\agent\\jeux.json (listes modifiées dans l'app)."""
         def propre(liste):
@@ -2430,6 +2452,7 @@ class Agent:
             "master": self.master.pour_app, "master_maj": self.master.maj,
             "master_afficher": self.master_afficher,
             "jeux": self.jeux_pour_app, "jeux_maj": self.jeux_maj, "pas_un_jeu": self.pas_un_jeu,
+            "historique": self.historique_pour_app,
             "etat_court": self.etat_court,
             "piece": self.piece_pour_app, "clim_maj": self.clim_maj,
             "sites": self.sites_pour_app, "sites_maj": self.sites_maj,
