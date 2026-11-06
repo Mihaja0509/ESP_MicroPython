@@ -460,8 +460,8 @@ class _CarteClimPlanState extends State<CarteClimPlan> {
     final phase = (_rt['phase'] ?? 'idle').toString();
     final t = e.pieceT;
     final piece = t == null
-        ? 'Room: no reading (sensor not connected?)'
-        : 'Room: ${t.toStringAsFixed(1)} °C · ${e.pieceH} %'
+        ? 'Room: -- °C · -- %'
+        : 'Room: ${t.toStringAsFixed(1)} °C · ${e.pieceH >= 0 ? e.pieceH : '--'} %'
               '${e.pieceP > 0 ? ' · ${e.pieceP} hPa' : ''}';
     return Carte(
       jeu: widget.jeu,

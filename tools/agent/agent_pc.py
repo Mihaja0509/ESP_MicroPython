@@ -1941,6 +1941,7 @@ class Agent:
         self.lum_esp = max(5, min(100, int(charger_preferences().get("lum_esp", 85))))
         self.rot_esp = 180 if int(charger_preferences().get("rot_esp", 0)) == 180 else 0
         self.piece = {}          # Phase 13 : dernière mesure du capteur (CLIMAT), voir lire_climat
+        self.piece_vue = None    # Phase 14-bis : une mesure récente (moins de 30 s) est-elle reçue ?
         self.clim = None         # Phase 13 : état de la clim donné par le téléphone (/clim_maj)
         self.clim_envoye = 0.0   # Phase 14 : heure du dernier envoi de la ligne CLIM à l'ESP32
         self.clim_recu = 0.0     # Phase 14-bis : heure du dernier /clim_maj reçu du téléphone
@@ -2172,6 +2173,7 @@ class Agent:
             self.precedent["ROT_ESP"] = self.rot_esp
             self.liaison.envoyer(f"ROT_ESP {self.rot_esp}")
         self._envoyer_clim()
+        self._suivre_piece()
         reste = self.arret_reste()
         if self.precedent.get("ARRET") != (reste > 0):
             self.precedent["ARRET"] = reste > 0
@@ -2490,6 +2492,18 @@ class Agent:
         except ValueError:
             return
         self.piece = {"t": t10 / 10.0, "h": h, "p": p, "vu": time.time()}
+        self._suivre_piece()
+
+    def _suivre_piece(self):
+        """Une ligne de journal quand les mesures du capteur arrivent ou s'arrêtent (pas à chaque mesure)."""
+        p = self.piece
+        recente = bool(p) and time.time() - p["vu"] < 30
+        if recente != self.piece_vue:
+            self.piece_vue = recente
+            if recente:
+                print("[agent] capteur : mesures reçues (%.1f °C, %d %%, %d hPa)" % (p["t"], p["h"], p["p"]))
+            else:
+                print("[agent] capteur : plus de mesure depuis 30 s (câblage ?)")
 
     def piece_pour_app(self):
         """Pour /clim_mesure et l'app : la mesure, ou ok=False si elle a plus de 30 s."""

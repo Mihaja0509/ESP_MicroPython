@@ -1,5 +1,8 @@
 # Capteur de la pièce (Phase 13) : AHT20 (température + humidité) et BMP280 (pression), en I2C.
 # Mesure toutes les 5 s sans bloquer l'écran : on déclenche la mesure, puis on la lit 90 ms plus tard.
+# Phase 14-bis : lecture robuste. Une erreur I2C ne tue jamais la boucle ; l'initialisation est retentée
+# toutes les 10 s tant que le capteur ne répond pas (fil débranché puis rebranché) ; le bus est
+# réinitialisé après 3 échecs de suite ; une mesure de plus de 60 s n'est jamais renvoyée.
 import struct
 import time
 
@@ -9,25 +12,46 @@ SDA = 7      # numéros des GPIO trouvés par tools/i2c_scan.py le 2026-11-06 (A
 SCL = 6
 DECALAGE_T = 0.0    # °C ajoutés à la mesure (la carte chauffe un peu : à régler avec un vrai thermomètre)
 PERIODE_MS = 5000
+REESSAI_MS = 10000  # capteur absent : nouvel essai d'initialisation toutes les 10 s
+PEREMPTION_MS = 60000  # une mesure plus vieille que ça n'est plus affichée
 AHT = 0x38
 
 
 class Capteur:
     def __init__(self):
         self.ok = False
+        self.i2c = None
         self._t = self._h = self._p = None
+        self._vu = None            # ticks de la dernière bonne mesure
         self._lance = None
         self._prochain = time.ticks_ms()
         self._echecs = 0
         self._bmp = None
+        self._prochain_essai = time.ticks_ms()
+        self._derniere_alerte = None
+        self._init()
+
+    # --- initialisation (jamais d'exception) --------------------------------------------
+    def _alerte(self, texte):
+        """Au plus un message par minute (ils finissent dans agent.log)."""
+        maintenant = time.ticks_ms()
+        if self._derniere_alerte is None or time.ticks_diff(maintenant, self._derniere_alerte) > 60000:
+            self._derniere_alerte = maintenant
+            print(texte)
+
+    def _init(self):
+        """(Ré)initialise le bus et le capteur. Renvoie True si l'AHT20 répond."""
+        self.ok = False
+        self._bmp = None
+        self._lance = None
         if SDA is None or SCL is None:
-            return
+            return False
         try:
             self.i2c = I2C(0, sda=Pin(SDA), scl=Pin(SCL), freq=100_000)
             adresses = self.i2c.scan()
             if AHT not in adresses:
-                print("CAPTEUR AHT20 absent")
-                return
+                self._alerte("CAPTEUR AHT20 absent (câblage SDA %d / SCL %d ?)" % (SDA, SCL))
+                return False
             time.sleep_ms(40)
             if not (self.i2c.readfrom(AHT, 1)[0] & 0x08):  # pas calibré : commande d'initialisation
                 self.i2c.writeto(AHT, b"\xBE\x08\x00")
@@ -40,8 +64,12 @@ class Capteur:
                         self._bmp = None
                     break
             self.ok = True
+            self._echecs = 0
+            self._prochain = time.ticks_ms()
+            return True
         except Exception as e:
-            print("CAPTEUR erreur %s" % e)
+            self._alerte("CAPTEUR erreur %s" % e)
+            return False
 
     # --- BMP280 (formules du constructeur, version à virgule flottante) ----------------
     def _bmp_init(self, adr):
@@ -78,11 +106,28 @@ class Capteur:
         self._echecs += 1
         self._prochain = time.ticks_add(maintenant, PERIODE_MS)
         if self._echecs >= 3:
-            self._t = self._h = self._p = None  # plus de mesure fiable : l'écran n'affiche rien
+            # 3 échecs de suite : plus de mesure fiable, et on repart de zéro sur le bus
+            self._t = self._h = self._p = None
+            self._vu = None
+            self._prochain_essai = time.ticks_add(maintenant, REESSAI_MS)
+            self._init()
 
     def pas(self, maintenant):
-        """À appeler à chaque tour de boucle. Renvoie True quand une nouvelle mesure est prête."""
+        """À appeler à chaque tour de boucle. Renvoie True quand une nouvelle mesure est prête.
+        Ne lève jamais d'exception : une erreur I2C n'arrête pas l'écran."""
+        try:
+            return self._pas(maintenant)
+        except Exception as e:  # filet de sécurité : on retentera au tour suivant
+            self._alerte("CAPTEUR erreur %s" % e)
+            self._lance = None
+            return False
+
+    def _pas(self, maintenant):
         if not self.ok:
+            # capteur absent ou en panne : nouvel essai d'initialisation toutes les 10 s
+            if SDA is not None and SCL is not None and time.ticks_diff(maintenant, self._prochain_essai) >= 0:
+                self._prochain_essai = time.ticks_add(maintenant, REESSAI_MS)
+                self._init()
             return False
         if self._lance is None:
             if time.ticks_diff(maintenant, self._prochain) >= 0:
@@ -111,6 +156,7 @@ class Capteur:
         self._lance = None
         self._echecs = 0
         self._prochain = time.ticks_add(maintenant, PERIODE_MS)
+        self._vu = maintenant
         # lissage léger : le bruit de mesure ne fait pas clignoter l'écran ni l'automatisme
         self._t = t if self._t is None else self._t + 0.4 * (t - self._t)
         self._h = h if self._h is None else self._h + 0.4 * (h - self._h)
@@ -119,7 +165,10 @@ class Capteur:
         return True
 
     def mesure(self):
-        """(°C, % d'humidité, hPa) ou None. hPa = 0 si pas de BMP280."""
-        if self._t is None:
+        """(°C, % d'humidité, hPa) ou None. hPa = 0 si pas de BMP280. None aussi quand la dernière
+        bonne mesure a plus de 60 s : jamais de valeur périmée à l'écran."""
+        if self._t is None or self._vu is None:
+            return None
+        if time.ticks_diff(time.ticks_ms(), self._vu) > PEREMPTION_MS:
             return None
         return (self._t, self._h, self._p or 0)
