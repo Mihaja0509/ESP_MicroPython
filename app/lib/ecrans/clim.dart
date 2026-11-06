@@ -74,7 +74,7 @@ class _CarteClimState extends State<CarteClim> {
   /// (Cool, Auto, 16 °C). À essayer si l'appui court ne fait rien.
   void _powerAlternatif() => _envoyer(
         ClimIr.trame(
-            mode: ModeClim.cool, vent: VentClim.auto, temp: 16, swing: false, touchePower: true),
+            mode: ModeClim.cool, vent: VentClim.auto, temp: 16, swing: true, touchePower: true),
         'power (alt)',
       );
 

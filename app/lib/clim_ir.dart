@@ -39,7 +39,8 @@ class ClimIr {
 
   /// Les 8 octets de la trame. Octets 0 à 6 : 0x16, ventilation + mode, quatre zéros,
   /// température en BCD (24 °C = 0x24). Octet 7 : checksum (haut) + drapeaux (bas) :
-  /// bit 0 = 1 si le swing est arrêté, bit 3 = touche marche/arrêt.
+  /// bit 0 = 1 si le swing est actif (constaté sur la vraie clim, Phase 13), bit 3 = touche
+  /// marche/arrêt.
   static List<int> trame({
     required ModeClim mode,
     required VentClim vent,
@@ -48,8 +49,16 @@ class ClimIr {
     bool touchePower = false,
   }) {
     final bcd = ((temp ~/ 10) << 4) | (temp % 10);
-    final b = <int>[0x16, (_vents[vent]! << 4) | _modes[mode]!, 0, 0, 0, 0, bcd];
-    final bas = (swing ? 0 : 1) | (touchePower ? 8 : 0);
+    final b = <int>[
+      0x16,
+      (_vents[vent]! << 4) | _modes[mode]!,
+      0,
+      0,
+      0,
+      0,
+      bcd,
+    ];
+    final bas = (swing ? 1 : 0) | (touchePower ? 8 : 0);
     var somme = bas;
     for (final x in b) {
       somme += (x & 0xF) + (x >> 4);
@@ -85,8 +94,10 @@ class ClimIr {
   /// Envoie une trame avec l'émetteur du téléphone. Renvoie false si ça n'a pas pu partir.
   static Future<bool> envoyer(List<int> octets) async {
     try {
-      return await _canal.invokeMethod<bool>(
-              'emettre', {'frequence': frequence, 'motif': durees(octets)}) ??
+      return await _canal.invokeMethod<bool>('emettre', {
+            'frequence': frequence,
+            'motif': durees(octets),
+          }) ??
           false;
     } catch (_) {
       return false;
