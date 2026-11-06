@@ -134,6 +134,7 @@ AIDE = """Commandes PC :
   VERROU                verrouille        |  ECRAN_OFF / ECRAN_ON / ECRAN_BASCULE  écran noir
   VEILLE                mise en veille    |  ARRET          arrêt dans 60 s  |  ANNULER
   LUM_ESP 60            luminosité de l'écran de l'ESP32
+  ROT_ESP 180           retourne l'écran de l'ESP32 (0 = normal)
   RAC nom               lance un raccourci (créés depuis le téléphone, raccourcis.json)
   TOUCHES ctrl+6        touches envoyées directement par Windows (disposition du clavier respectée)
   ETAT                  affiche ce que l'agent envoie à l'ESP32
@@ -1929,6 +1930,7 @@ class Agent:
         self.verrou_depuis = 0.0
         self.arret_fin = 0.0     # heure prévue de l'arrêt du PC (0 = pas d'arrêt)
         self.lum_esp = max(5, min(100, int(charger_preferences().get("lum_esp", 85))))
+        self.rot_esp = 180 if int(charger_preferences().get("rot_esp", 0)) == 180 else 0
         self.lent["ecrans"] = 1
         self.noir = EcranNoir(fin_de_session=self._fin_de_session)
 
@@ -2022,7 +2024,7 @@ class Agent:
                       for j in self.meteo.jours],
             "esp": self.liaison.ser is not None, "ecran_esp": self.ecran_esp,
             "arret": self.arret_reste(), "ecran_noir": self.noir.actif,
-            "lum_esp": self.lum_esp, "ecrans": self.lent["ecrans"],
+            "lum_esp": self.lum_esp, "rot_esp": self.rot_esp, "ecrans": self.lent["ecrans"],
             # Phase 11
             "video": "" if p.get("VIDEO", "-") == "-" else p.get("VIDEO", "").split("|")[0],
             "video_titre": p.get("VIDEO", "").partition("|")[2],
@@ -2113,6 +2115,9 @@ class Agent:
         if self.precedent.get("LUM_ESP") != self.lum_esp:
             self.precedent["LUM_ESP"] = self.lum_esp
             self.liaison.envoyer(f"LUM_ESP {self.lum_esp}")
+        if self.precedent.get("ROT_ESP") != self.rot_esp:
+            self.precedent["ROT_ESP"] = self.rot_esp
+            self.liaison.envoyer(f"ROT_ESP {self.rot_esp}")
         reste = self.arret_reste()
         if self.precedent.get("ARRET") != (reste > 0):
             self.precedent["ARRET"] = reste > 0
@@ -2255,6 +2260,17 @@ class Agent:
             self.precedent["LUM_ESP"] = self.lum_esp
             self.liaison.envoyer(f"LUM_ESP {self.lum_esp}")
             return f"ESP32 brightness: {self.lum_esp} %"
+        if cmd == "ROT_ESP":
+            self.rot_esp = 180 if arg.strip() == "180" else 0
+            p = charger_preferences()
+            p["rot_esp"] = self.rot_esp
+            try:
+                ecrire_preferences(p)
+            except OSError:
+                pass
+            self.precedent["ROT_ESP"] = self.rot_esp
+            self.liaison.envoyer(f"ROT_ESP {self.rot_esp}")
+            return "ESP32 orientation: " + ("flipped" if self.rot_esp else "normal")
         if cmd == "RAC":
             return self.lancer_raccourci(arg)
         return None

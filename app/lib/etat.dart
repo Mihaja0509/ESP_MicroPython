@@ -19,15 +19,16 @@ class JourMeteo {
   });
 
   factory JourMeteo.depuisJson(Map<String, dynamic> m) => JourMeteo(
-        icone: (m['icone'] ?? 'nuage').toString(),
-        tmax: _entier(m['tmax']),
-        tmin: _entier(m['tmin']),
-        pluie: _entier(m['pluie']),
-        heure: _entier(m['heure']),
-      );
+    icone: (m['icone'] ?? 'nuage').toString(),
+    tmax: _entier(m['tmax']),
+    tmin: _entier(m['tmin']),
+    pluie: _entier(m['pluie']),
+    heure: _entier(m['heure']),
+  );
 
-  String get textePluie =>
-      (pluie >= 20 && heure >= 0) ? 'Rain $pluie % around $heure:00' : 'No rain expected';
+  String get textePluie => (pluie >= 20 && heure >= 0)
+      ? 'Rain $pluie % around $heure:00'
+      : 'No rain expected';
 }
 
 class EtatPC {
@@ -52,11 +53,14 @@ class EtatPC {
   final int arret; // secondes avant l'arrêt du PC, -1 = pas d'arrêt prévu
   final bool ecranNoir; // écran du PC en mode « écran noir »
   final int lumEsp; // luminosité de l'écran de l'ESP32 (5 à 100), -1 = inconnue
+  final int rotEsp; // 0 = normal, 180 = écran retourné (Phase 13)
   final int ecrans; // nombre d'écrans allumés sur le PC
-  final String video; // source de la vidéo au premier plan (YouTube, Netflix…), '' si aucune
+  final String
+  video; // source de la vidéo au premier plan (YouTube, Netflix…), '' si aucune
   final String videoTitre;
   final int inactif; // minutes sans clavier ni souris (0 = PC utilisé, ou jeu / vidéo / verrou)
-  final int jeuTotal; // minutes passées en tout sur le jeu en cours, -1 = inconnu
+  final int
+  jeuTotal; // minutes passées en tout sur le jeu en cours, -1 = inconnu
   final int masterV; // change quand les données du master changent sur le PC
   final bool masterActif; // appli de recherche au premier plan depuis 2 min
   final int videoPos; // secondes depuis le début de la vidéo, -1 = inconnue (Phase 11-bis)
@@ -85,6 +89,7 @@ class EtatPC {
     this.arret = -1,
     this.ecranNoir = false,
     this.lumEsp = -1,
+    this.rotEsp = 0,
     this.ecrans = 1,
     this.video = '',
     this.videoTitre = '',
@@ -98,25 +103,25 @@ class EtatPC {
   });
 
   factory EtatPC.vide() => const EtatPC(
-        recu: false,
-        cpu: -1,
-        ram: -1,
-        vol: -1,
-        bat: -1,
-        enCharge: false,
-        gpuTemp: -1,
-        gpuCharge: -1,
-        vram: -1,
-        cpuTemp: -1,
-        fps: -1,
-        casque: '',
-        manette: false,
-        verrou: false,
-        jeu: '',
-        meteo: [],
-        esp: false,
-        ecranEsp: true,
-      );
+    recu: false,
+    cpu: -1,
+    ram: -1,
+    vol: -1,
+    bat: -1,
+    enCharge: false,
+    gpuTemp: -1,
+    gpuCharge: -1,
+    vram: -1,
+    cpuTemp: -1,
+    fps: -1,
+    casque: '',
+    manette: false,
+    verrou: false,
+    jeu: '',
+    meteo: [],
+    esp: false,
+    ecranEsp: true,
+  );
 
   factory EtatPC.depuisJson(Map<String, dynamic> m) {
     final meteo = <JourMeteo>[];
@@ -148,6 +153,7 @@ class EtatPC {
       arret: m.containsKey('arret') ? _entier(m['arret']) : -1,
       ecranNoir: m['ecran_noir'] == true,
       lumEsp: _entier(m['lum_esp']),
+      rotEsp: _entier(m['rot_esp']) == 180 ? 180 : 0,
       ecrans: m['ecrans'] is num ? (m['ecrans'] as num).toInt() : 1,
       video: (m['video'] ?? '').toString(),
       videoTitre: (m['video_titre'] ?? '').toString(),

@@ -580,13 +580,14 @@ class Interface:
         fb = self.fb
         self._suivre_jeu(etat, maintenant)
         # nom du jeu + chrono de la session
+        # nom du jeu à gauche, heure à droite ; la durée de session passe dans la ligne du bas
         session = self._age(self.jeu_debut, maintenant) // 60000
-        chrono = duree_texte(session) if session >= 1 else ""
-        largeur_chrono = self.f_xs.largeur(chrono) + 16 if chrono else 0
-        nom = self.f_s.couper(etat["evt"]["jeu"], 172 - largeur_chrono)
+        lt = time.localtime()
+        heure = "%02d:%02d" % (lt[3], lt[4]) if lt[0] >= 2025 else "--:--"
+        largeur_heure = self.f_s.largeur(heure)
+        nom = self.f_s.couper(etat["evt"]["jeu"], 172 - largeur_heure - 8)
         self.f_s.ecrire(fb, nom, 14, 10, CYAN, carte)
-        if chrono:
-            self.f_xs.ecrire(fb, chrono, 186 - self.f_xs.largeur(chrono), 12, GRIS, carte)
+        self.f_s.ecrire(fb, heure, 186 - largeur_heure, 10, BLANC, carte)
         # FPS en grand (l'essentiel)
         fps = self._lisse("fps", etat["perf"]["fps"])
         if fps >= 0:
@@ -598,8 +599,10 @@ class Interface:
         self._courbe_fps(16, 84, 160, 11)
         self._barre_temp(102, "CPU", self._lisse("tcpu", etat["perf"]["cpu_temp"]), carte)
         self._barre_temp(124, "GPU", self._lisse("tgpu", etat["gpu"]["temp"]), carte)
-        # ligne du bas : change toutes les 5 s (charge / minimum et moyenne / temps total)
+        # ligne du bas : change toutes les 5 s (session / charge / minimum et moyenne / temps total)
         textes = []
+        if session >= 1:
+            textes.append("Session: %s" % duree_texte(session))
         morceaux = []
         if etat["gpu"]["charge"] >= 0:
             morceaux.append("GPU %d %%" % etat["gpu"]["charge"])

@@ -30,7 +30,7 @@ ORANGE = couleur(255, 140, 0)
 
 
 class Ecran:
-    def __init__(self, paysage=True):
+    def __init__(self, paysage=True, demi_tour=False):
         self.spi = SPI(1, baudrate=40_000_000, polarity=0, phase=0,
                        sck=Pin(40), mosi=Pin(45))
         self.cs = Pin(42, Pin.OUT, value=1)
@@ -38,6 +38,7 @@ class Ecran:
         self.rst = Pin(39, Pin.OUT, value=1)
         self.bl = PWM(Pin(48), freq=1000)
         self.paysage = paysage
+        self.demi_tour = bool(demi_tour)  # Phase 13 : image retournée de 180° (carte posée à l'envers)
         if paysage:
             self.largeur, self.hauteur = HAUTEUR_PANNEAU, LARGEUR_PANNEAU
         else:
@@ -72,14 +73,27 @@ class Ecran:
         self._cmd(0x11)                  # sortie du mode veille
         time.sleep_ms(120)
         self._cmd(0x3A, b"\x55")         # 16 bits par pixel
-        madctl = 0x60 if self.paysage else 0x00
-        if BGR:
-            madctl |= 0x08
-        self._cmd(0x36, bytes([madctl]))  # orientation
+        self._madctl()                   # orientation
         self._cmd(0x21)                  # inversion (écrans IPS)
         self._cmd(0x13)                  # mode normal
         self._cmd(0x29)                  # écran allumé
         time.sleep_ms(50)
+
+    def _madctl(self):
+        if self.paysage:
+            madctl = 0xA0 if self.demi_tour else 0x60
+        else:
+            madctl = 0xC0 if self.demi_tour else 0x00
+        if BGR:
+            madctl |= 0x08
+        self._cmd(0x36, bytes([madctl]))
+
+    def tourner(self, demi_tour):
+        """Retourne l'image de 180° sans toucher au tampon (les marges de 34 px sont symétriques)."""
+        demi_tour = bool(demi_tour)
+        if demi_tour != self.demi_tour:
+            self.demi_tour = demi_tour
+            self._madctl()
 
     # --- usage -------------------------------------------------------------
     def luminosite(self, pourcent):

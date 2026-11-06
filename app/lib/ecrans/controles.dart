@@ -40,7 +40,8 @@ class _EcranControlesState extends State<EcranControles> {
     cx.cmd(ligne);
   }
 
-  int _colonnes(BuildContext context) => MediaQuery.sizeOf(context).width > 560 ? 5 : 3;
+  int _colonnes(BuildContext context) =>
+      MediaQuery.sizeOf(context).width > 560 ? 5 : 3;
 
   @override
   Widget build(BuildContext context) {
@@ -84,7 +85,11 @@ class _EcranControlesState extends State<EcranControles> {
             children: [
               _rond(Icons.volume_off_rounded, () => _envoyer('MUTE')),
               _rond(Icons.skip_previous_rounded, () => _envoyer('PREV')),
-              _rond(Icons.play_arrow_rounded, () => _envoyer('PLAY'), grand: true),
+              _rond(
+                Icons.play_arrow_rounded,
+                () => _envoyer('PLAY'),
+                grand: true,
+              ),
               _rond(Icons.skip_next_rounded, () => _envoyer('NEXT')),
             ],
           ),
@@ -120,40 +125,92 @@ class _EcranControlesState extends State<EcranControles> {
               });
             },
             fin: IconButton(
-              tooltip: e.ecranEsp ? 'Turn off the ESP32 screen' : 'Turn on the ESP32 screen',
-              icon: Icon(e.ecranEsp ? Icons.lightbulb_rounded : Icons.lightbulb_outline_rounded,
-                  color: e.ecranEsp ? Couleurs.orange : Couleurs.gris),
-              onPressed: () => _envoyer(e.ecranEsp ? 'ECRAN_ESP 0' : 'ECRAN_ESP 1'),
+              tooltip: e.ecranEsp
+                  ? 'Turn off the ESP32 screen'
+                  : 'Turn on the ESP32 screen',
+              icon: Icon(
+                e.ecranEsp
+                    ? Icons.lightbulb_rounded
+                    : Icons.lightbulb_outline_rounded,
+                color: e.ecranEsp ? Couleurs.orange : Couleurs.gris,
+              ),
+              onPressed: () =>
+                  _envoyer(e.ecranEsp ? 'ECRAN_ESP 0' : 'ECRAN_ESP 1'),
             ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              const Icon(
+                Icons.screen_rotation_rounded,
+                size: 18,
+                color: Couleurs.gris,
+              ),
+              const SizedBox(width: 8),
+              const Text(
+                'ESP32 orientation',
+                style: TextStyle(color: Couleurs.doux),
+              ),
+              const Spacer(),
+              ChoiceChip(
+                label: const Text('Normal'),
+                selected: e.rotEsp != 180,
+                onSelected: (_) => _envoyer('ROT_ESP 0'),
+              ),
+              const SizedBox(width: 6),
+              ChoiceChip(
+                label: const Text('Flipped'),
+                selected: e.rotEsp == 180,
+                onSelected: (_) => _envoyer('ROT_ESP 180'),
+              ),
+            ],
           ),
         ],
       ),
     );
   }
 
-  Widget _ligneReglage(String nom, double valeur, double min, ValueChanged<double> onChanged,
-      ValueChanged<double> onChangeEnd,
-      {Widget? fin}) {
+  Widget _ligneReglage(
+    String nom,
+    double valeur,
+    double min,
+    ValueChanged<double> onChanged,
+    ValueChanged<double> onChangeEnd, {
+    Widget? fin,
+  }) {
     return Row(
       children: [
         SizedBox(
           width: 52,
-          child: Text(nom,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.w700, color: Couleurs.doux)),
+          child: Text(
+            nom,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontWeight: FontWeight.w700,
+              color: Couleurs.doux,
+            ),
+          ),
         ),
         Expanded(
-          child: Slider(value: valeur, min: min, max: 100, onChanged: onChanged, onChangeEnd: onChangeEnd),
+          child: Slider(
+            value: valeur,
+            min: min,
+            max: 100,
+            onChanged: onChanged,
+            onChangeEnd: onChangeEnd,
+          ),
         ),
         SizedBox(
           width: 44,
-          child: Text('${valeur.round()} %',
-              maxLines: 1,
-              overflow: TextOverflow.fade,
-              softWrap: false,
-              textAlign: TextAlign.right,
-              style: const TextStyle(fontSize: 12, color: Couleurs.gris)),
+          child: Text(
+            '${valeur.round()} %',
+            maxLines: 1,
+            overflow: TextOverflow.fade,
+            softWrap: false,
+            textAlign: TextAlign.right,
+            style: const TextStyle(fontSize: 12, color: Couleurs.gris),
+          ),
         ),
         ?fin,
       ],
@@ -191,7 +248,11 @@ class _EcranControlesState extends State<EcranControles> {
   }
 
   /// Barre « recherche + bouton Ajouter » (la recherche n'apparaît qu'avec beaucoup d'éléments).
-  Widget _barre({required int nombre, required String texteAjout, required VoidCallback? ajouter}) {
+  Widget _barre({
+    required int nombre,
+    required String texteAjout,
+    required VoidCallback? ajouter,
+  }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Row(
@@ -211,7 +272,9 @@ class _EcranControlesState extends State<EcranControles> {
                               icon: const Icon(Icons.close_rounded, size: 18),
                               onPressed: () => setState(_recherche.clear),
                             ),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                     ),
                   )
                 : Text(
@@ -238,13 +301,17 @@ class _EcranControlesState extends State<EcranControles> {
   }
 
   Widget _grille(List<Widget> tuiles) {
-    return GrilleBoutons(colonnes: _colonnes(context), espace: 8, enfants: tuiles);
+    return GrilleBoutons(
+      colonnes: _colonnes(context),
+      espace: 8,
+      enfants: tuiles,
+    );
   }
 
   Widget _vide(String texte) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        child: Text(texte, style: const TextStyle(color: Couleurs.gris)),
-      );
+    padding: const EdgeInsets.symmetric(vertical: 8),
+    child: Text(texte, style: const TextStyle(color: Couleurs.gris)),
+  );
 
   // --- raccourcis
   Widget _ongletRaccourcis() {
@@ -258,29 +325,41 @@ class _EcranControlesState extends State<EcranControles> {
           ajouter: cx.connecte ? () => _editerRaccourci(null) : null,
         ),
         if (cx.raccourcis.isEmpty)
-          _vide('No shortcuts. Tap + to create one: keys (e.g. Ctrl + 6), '
-              'admin command, text, app… in a single tap.')
+          _vide(
+            'No shortcuts. Tap + to create one: keys (e.g. Ctrl + 6), '
+            'admin command, text, app… in a single tap.',
+          )
         else if (liste.isEmpty)
           _vide('No results.')
         else
           _grille([
             for (final r in liste)
-              _tuile(actionRaccourci(r),
-                  modifier: () => _editerRaccourci(r), supprimer: () => _supprimerRaccourci(r)),
+              _tuile(
+                actionRaccourci(r),
+                modifier: () => _editerRaccourci(r),
+                supprimer: () => _supprimerRaccourci(r),
+              ),
           ]),
       ],
     );
   }
 
   Future<void> _editerRaccourci(Raccourci? r) async {
-    await Navigator.of(context).push(MaterialPageRoute<void>(
-      builder: (_) => EditeurRaccourci(cx: cx, existant: r),
-    ));
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => EditeurRaccourci(cx: cx, existant: r),
+      ),
+    );
   }
 
   Future<void> _supprimerRaccourci(Raccourci r) async {
-    final ok = await confirmer(context, 'Delete "${r.nom}"?', 'The shortcut will be removed from the PC.',
-        bouton: 'Delete', couleur: Couleurs.rouge);
+    final ok = await confirmer(
+      context,
+      'Delete "${r.nom}"?',
+      'The shortcut will be removed from the PC.',
+      bouton: 'Delete',
+      couleur: Couleurs.rouge,
+    );
     if (ok) await cx.retirerRaccourci(r.nom);
   }
 
@@ -290,7 +369,11 @@ class _EcranControlesState extends State<EcranControles> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _barre(nombre: cx.apps.length, texteAjout: 'Add an app', ajouter: cx.connecte ? () => _editerApp(null) : null),
+        _barre(
+          nombre: cx.apps.length,
+          texteAjout: 'Add an app',
+          ajouter: cx.connecte ? () => _editerApp(null) : null,
+        ),
         if (cx.apps.isEmpty)
           _vide('No apps yet. Tap + to add a web link or a PC program.')
         else if (liste.isEmpty)
@@ -298,7 +381,11 @@ class _EcranControlesState extends State<EcranControles> {
         else
           _grille([
             for (final a in liste)
-              _tuile(actionApp(a), modifier: () => _editerApp(a), supprimer: () => _supprimerApp(a)),
+              _tuile(
+                actionApp(a),
+                modifier: () => _editerApp(a),
+                supprimer: () => _supprimerApp(a),
+              ),
           ]),
       ],
     );
@@ -311,13 +398,22 @@ class _EcranControlesState extends State<EcranControles> {
     );
     if (resultat == null) return;
     HapticFeedback.selectionClick();
-    await cx.ajouterApp(resultat.$1, resultat.$2, resultat.$3, ancien: app?.nom ?? '');
+    await cx.ajouterApp(
+      resultat.$1,
+      resultat.$2,
+      resultat.$3,
+      ancien: app?.nom ?? '',
+    );
   }
 
   Future<void> _supprimerApp(AppPc app) async {
-    final ok = await confirmer(context, 'Remove "${app.nom}"?',
-        app.cible.isEmpty ? 'The app will be removed from the list.' : app.cible,
-        bouton: 'Remove', couleur: Couleurs.rouge);
+    final ok = await confirmer(
+      context,
+      'Remove "${app.nom}"?',
+      app.cible.isEmpty ? 'The app will be removed from the list.' : app.cible,
+      bouton: 'Remove',
+      couleur: Couleurs.rouge,
+    );
     if (ok) {
       HapticFeedback.selectionClick();
       await cx.retirerApp(app.nom);
@@ -332,24 +428,31 @@ class _EcranControlesState extends State<EcranControles> {
         if (e.arretPrevu)
           Padding(
             padding: const EdgeInsets.only(bottom: 10),
-            child: BandeauArret(secondes: e.arret, onAnnuler: () => _envoyer('ANNULER')),
+            child: BandeauArret(
+              secondes: e.arret,
+              onAnnuler: () => _envoyer('ANNULER'),
+            ),
           ),
         const Padding(
           padding: EdgeInsets.only(bottom: 10),
-          child: Text('Long press: add to favorites (Home and widget).',
-              style: TextStyle(color: Couleurs.gris, fontSize: 12)),
+          child: Text(
+            'Long press: add to favorites (Home and widget).',
+            style: TextStyle(color: Couleurs.gris, fontSize: 12),
+          ),
         ),
         _grille([
           for (final a in actionsPc)
             if (a.id == 'cmd:ECRAN_BASCULE')
-              _tuile(ActionDadou(
-                id: a.id,
-                nom: e.ecranNoir ? 'Wake the screen' : 'Black screen',
-                icone: e.ecranNoir ? Icons.desktop_windows_rounded : a.icone,
-                ligne: a.ligne,
-                code: a.code,
-                couleur: e.ecranNoir ? Couleurs.orange : a.couleur,
-              ))
+              _tuile(
+                ActionDadou(
+                  id: a.id,
+                  nom: e.ecranNoir ? 'Wake the screen' : 'Black screen',
+                  icone: e.ecranNoir ? Icons.desktop_windows_rounded : a.icone,
+                  ligne: a.ligne,
+                  code: a.code,
+                  couleur: e.ecranNoir ? Couleurs.orange : a.couleur,
+                ),
+              )
             else
               _tuile(a),
         ]),
@@ -358,7 +461,11 @@ class _EcranControlesState extends State<EcranControles> {
   }
 
   // --- tuile commune + menu de l'appui long
-  Widget _tuile(ActionDadou a, {VoidCallback? modifier, VoidCallback? supprimer}) {
+  Widget _tuile(
+    ActionDadou a, {
+    VoidCallback? modifier,
+    VoidCallback? supprimer,
+  }) {
     return Tuile(
       icone: a.icone,
       texte: a.nom,
@@ -374,7 +481,11 @@ class _EcranControlesState extends State<EcranControles> {
     );
   }
 
-  Future<void> _menu(ActionDadou a, {VoidCallback? modifier, VoidCallback? supprimer}) async {
+  Future<void> _menu(
+    ActionDadou a, {
+    VoidCallback? modifier,
+    VoidCallback? supprimer,
+  }) async {
     HapticFeedback.mediumImpact();
     final favori = cx.estFavori(a.id);
     final choix = await showModalBottomSheet<String>(
@@ -387,13 +498,22 @@ class _EcranControlesState extends State<EcranControles> {
           children: [
             ListTile(
               leading: Icon(a.icone, color: a.couleur),
-              title: Text(a.nom, maxLines: 1, overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w700)),
+              title: Text(
+                a.nom,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
             ),
             const Divider(height: 1),
             ListTile(
-              leading: Icon(favori ? Icons.star_outline_rounded : Icons.star_rounded, color: Couleurs.orange),
-              title: Text(favori ? 'Remove from favorites' : 'Add to favorites'),
+              leading: Icon(
+                favori ? Icons.star_outline_rounded : Icons.star_rounded,
+                color: Couleurs.orange,
+              ),
+              title: Text(
+                favori ? 'Remove from favorites' : 'Add to favorites',
+              ),
               subtitle: const Text('Home and phone widget'),
               onTap: () => Navigator.pop(context, 'favori'),
             ),
@@ -405,7 +525,10 @@ class _EcranControlesState extends State<EcranControles> {
               ),
             if (supprimer != null)
               ListTile(
-                leading: const Icon(Icons.delete_rounded, color: Couleurs.rouge),
+                leading: const Icon(
+                  Icons.delete_rounded,
+                  color: Couleurs.rouge,
+                ),
                 title: const Text('Delete'),
                 onTap: () => Navigator.pop(context, 'supprimer'),
               ),
@@ -435,7 +558,11 @@ class _EcranControlesState extends State<EcranControles> {
         child: SizedBox(
           width: taille,
           height: taille,
-          child: Icon(icone, color: grand ? const Color(0xFF120E28) : Colors.white, size: grand ? 34 : 26),
+          child: Icon(
+            icone,
+            color: grand ? const Color(0xFF120E28) : Colors.white,
+            size: grand ? 34 : 26,
+          ),
         ),
       ),
     );
@@ -447,7 +574,11 @@ class BandeauArret extends StatelessWidget {
   final int secondes;
   final VoidCallback onAnnuler;
 
-  const BandeauArret({super.key, required this.secondes, required this.onAnnuler});
+  const BandeauArret({
+    super.key,
+    required this.secondes,
+    required this.onAnnuler,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -463,10 +594,12 @@ class BandeauArret extends StatelessWidget {
           const Icon(Icons.power_settings_new_rounded, color: Couleurs.rouge),
           const SizedBox(width: 10),
           Expanded(
-            child: Text('PC shutdown in $secondes s',
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.w700)),
+            child: Text(
+              'PC shutdown in $secondes s',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
           ),
           const SizedBox(width: 8),
           FilledButton(
@@ -516,7 +649,10 @@ class _DialogueAppState extends State<_DialogueApp> {
     final nom = _nom.text.trim();
     var cible = _cible.text.trim();
     if (cible.length > 1 && cible.startsWith('"') && cible.endsWith('"')) {
-      cible = cible.substring(1, cible.length - 1); // « Copier en tant que chemin » ajoute des guillemets
+      cible = cible.substring(
+        1,
+        cible.length - 1,
+      ); // « Copier en tant que chemin » ajoute des guillemets
     }
     String? erreur;
     if (nom.isEmpty) {
@@ -524,12 +660,16 @@ class _DialogueAppState extends State<_DialogueApp> {
     } else if (nom.length > 30) {
       erreur = 'Name too long (30 characters max).';
     } else if (cible.isEmpty) {
-      erreur = _sorte == 'web' ? 'Paste the web link.' : 'Paste the path of the file or program.';
+      erreur = _sorte == 'web'
+          ? 'Paste the web link.'
+          : 'Paste the path of the file or program.';
     } else if (cible.contains('"')) {
       erreur = 'No quotes in the link or path.';
-    } else if (_sorte == 'chemin' && !RegExp(r'^([A-Za-z]:[\\/]|\\\\|%)').hasMatch(cible)) {
+    } else if (_sorte == 'chemin' &&
+        !RegExp(r'^([A-Za-z]:[\\/]|\\\\|%)').hasMatch(cible)) {
       erreur = 'A Windows path starts with a drive letter, e.g. C:\\…';
-    } else if (_sorte == 'web' && (cible.contains(' ') || !cible.contains('.'))) {
+    } else if (_sorte == 'web' &&
+        (cible.contains(' ') || !cible.contains('.'))) {
       erreur = 'Invalid web link, e.g. https://www.youtube.com';
     }
     if (erreur != null) {
@@ -552,7 +692,10 @@ class _DialogueAppState extends State<_DialogueApp> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Onglets(
-              onglets: const [(Icons.public_rounded, 'Web link'), (Icons.folder_open_rounded, 'Windows')],
+              onglets: const [
+                (Icons.public_rounded, 'Web link'),
+                (Icons.folder_open_rounded, 'Windows'),
+              ],
               choisi: web ? 0 : 1,
               onChange: (i) => setState(() {
                 _sorte = i == 0 ? 'web' : 'chemin';
@@ -564,7 +707,10 @@ class _DialogueAppState extends State<_DialogueApp> {
               controller: _nom,
               textCapitalization: TextCapitalization.sentences,
               maxLength: 30,
-              decoration: const InputDecoration(labelText: 'Name', hintText: 'e.g. Netflix'),
+              decoration: const InputDecoration(
+                labelText: 'Name',
+                hintText: 'e.g. Netflix',
+              ),
             ),
             const SizedBox(height: 6),
             TextField(
@@ -573,11 +719,13 @@ class _DialogueAppState extends State<_DialogueApp> {
               keyboardType: web ? TextInputType.url : TextInputType.text,
               decoration: InputDecoration(
                 labelText: web ? 'Web link' : 'Windows path',
-                hintText: web ? 'https://www.netflix.com' : r'C:\Program Files\…\game.exe',
+                hintText: web
+                    ? 'https://www.netflix.com'
+                    : r'C:\Program Files\…\game.exe',
                 helperText: web
                     ? 'Opens in the PC browser.'
                     : 'Program, file or folder. Tip: right-click the file '
-                        '→ "Copy as path", then paste it here.',
+                          '→ "Copy as path", then paste it here.',
                 helperMaxLines: 4,
               ),
               onSubmitted: (_) => _valider(),
@@ -585,14 +733,23 @@ class _DialogueAppState extends State<_DialogueApp> {
             if (_erreur != null)
               Padding(
                 padding: const EdgeInsets.only(top: 10),
-                child: Text(_erreur!, style: const TextStyle(color: Couleurs.rouge)),
+                child: Text(
+                  _erreur!,
+                  style: const TextStyle(color: Couleurs.rouge),
+                ),
               ),
           ],
         ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-        FilledButton(onPressed: _valider, child: Text(modification ? 'Save' : 'Add')),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _valider,
+          child: Text(modification ? 'Save' : 'Add'),
+        ),
       ],
     );
   }

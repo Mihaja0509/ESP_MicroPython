@@ -7,6 +7,7 @@
 #   luminosité réglable depuis l'app (LUM_ESP n).
 # - Phase 10 : EVT VIDEO (scène cinéma), EVT INACTIF (scène calme), JEU_TOTAL (mode jeu).
 # - Phase 11 : MASTER {json} (scène master), MASTER_INFO ["icone", "texte"] (événement).
+# - Phase 13 : ROT_ESP 0|180 (écran retourné), CLIM / CLIMAT (clim et capteur).
 import json
 import select
 import sys
@@ -24,7 +25,16 @@ try:
 except ImportError:
     reglages = None
 
-ecran = lcd.Ecran(paysage=True)
+def lire_rotation():
+    """Phase 13 : sens de l'écran gardé dans rotation.txt (« 180 » = retourné)."""
+    try:
+        with open("rotation.txt") as f:
+            return f.read().strip() == "180"
+    except OSError:
+        return False
+
+
+ecran = lcd.Ecran(paysage=True, demi_tour=lire_rotation())
 ui = Interface(ecran)
 pc = PC()
 
@@ -333,6 +343,15 @@ def executer(ligne):
             etat["lum"] = max(5, min(100, int(arg)))
         except ValueError:
             return "ERR utilise : LUM_ESP 5..100"
+        return "OK"
+    if cmd == "ROT_ESP":
+        demi = arg.strip() == "180"
+        ecran.tourner(demi)
+        try:
+            with open("rotation.txt", "w") as f:
+                f.write("180" if demi else "0")
+        except OSError:
+            pass
         return "OK"
     # --- clavier / souris / multimédia ----------------------------------------
     if not pc.is_open():
