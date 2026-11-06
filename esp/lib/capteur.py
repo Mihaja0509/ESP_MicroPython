@@ -5,8 +5,8 @@ import time
 
 from machine import I2C, Pin
 
-SDA = None   # numéros des GPIO : à remplir avec le résultat de tools/i2c_scan.py
-SCL = None
+SDA = 7      # numéros des GPIO trouvés par tools/i2c_scan.py le 2026-11-06 (AHT20 0x38, BMP280 0x77)
+SCL = 6
 DECALAGE_T = 0.0    # °C ajoutés à la mesure (la carte chauffe un peu : à régler avec un vrai thermomètre)
 PERIODE_MS = 5000
 AHT = 0x38
