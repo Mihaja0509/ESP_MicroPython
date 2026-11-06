@@ -50,7 +50,9 @@ etat = {"connecte": False, "stat": stat, "gpu": gpu, "perf": perf, "evt": evt, "
         "arret_total": 60000,  # durée du compte à rebours (ms), pour la barre
         "lum": 85,             # luminosité choisie dans l'app (5 à 100)
         "master": None,        # Phase 11 : données du master (ligne MASTER du PC)
-        "meteo_now": None}     # Phase 11-ter : météo actuelle {icone, pluie}
+        "meteo_now": None,     # Phase 11-ter : météo actuelle {icone, pluie}
+        "clim": None,          # Phase 13 : état de la clim (ligne CLIM du PC)
+        "piece": None}         # Phase 13 : (°C, % humidité, hPa) du capteur, None = pas de capteur
 
 ATTENTE_ABSENT = 12000     # sans données depuis 12 s = PC éteint / en veille / agent arrêté
 RETOUR_PC = 5000           # il faut 5 s de données sans coupure pour dire « le PC est revenu »
@@ -343,6 +345,24 @@ def executer(ligne):
             etat["lum"] = max(5, min(100, int(arg)))
         except ValueError:
             return "ERR utilise : LUM_ESP 5..100"
+        return "OK"
+    if cmd == "CLIM":
+        # CLIM on mode temp reste auto : envoyé par le PC, venu du téléphone (minutes restantes)
+        try:
+            p = arg.split()
+            nouveau = {"on": p[0] == "1", "mode": p[1], "temp": int(p[2]), "reste": int(p[3]),
+                       "auto": p[4] == "1", "recu": time.ticks_ms()}
+        except (ValueError, IndexError):
+            return "ERR utilise : CLIM on mode temp reste auto"
+        ancien = etat["clim"]
+        etat["clim"] = nouveau
+        if ancien is not None and ancien["on"] != nouveau["on"]:
+            if not nouveau["on"]:
+                ui.reagir("thermo", "AC off")
+            elif nouveau["mode"] == "dry":
+                ui.reagir("thermo", "AC dry mode")
+            else:
+                ui.reagir("thermo", "AC on %d°" % nouveau["temp"])
         return "OK"
     if cmd == "ROT_ESP":
         demi = arg.strip() == "180"

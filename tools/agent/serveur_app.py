@@ -133,13 +133,26 @@ class ServeurApp:
     async def _http(self, connexion, requete):
         """Requêtes HTTP simples (widget Android). None = on continue en WebSocket."""
         morceaux = urllib.parse.urlsplit(requete.path)
-        if morceaux.path not in ("/widget", "/etat_court"):
+        if morceaux.path not in ("/widget", "/etat_court", "/clim_mesure", "/clim_maj"):
             return None
         if not self.token_valide(requete.headers.get("X-Token", "")):
             return connexion.respond(HTTPStatus.UNAUTHORIZED, "Unauthorized\n")
+        if morceaux.path == "/clim_mesure":  # Phase 13 : capteur de la pièce, pour l'automatisme
+            try:
+                mesure = await self._appel("piece")
+            except Exception as e:
+                mesure = {"ok": False, "erreur": str(e)}
+            return connexion.respond(HTTPStatus.OK, json.dumps(mesure, ensure_ascii=False))
+        if morceaux.path == "/clim_maj":  # Phase 13 : état de la clim, poussé par le téléphone
+            q = {k: v[0] for k, v in urllib.parse.parse_qs(morceaux.query).items()}
+            try:
+                await self._appel("clim_maj", q)
+            except Exception:
+                pass
+            return connexion.respond(HTTPStatus.OK, "OK\n")
         if morceaux.path == "/etat_court":
             try:
-                court = self.r["etat_court"]()
+                court = await self._appel("etat_court")
             except Exception as e:
                 court = {"erreur": str(e)}
             return connexion.respond(HTTPStatus.OK, json.dumps(court, ensure_ascii=False))

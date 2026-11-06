@@ -1,11 +1,14 @@
 // Carte « Air conditioner » (Phase 12) : télécommande de la clim York avec l'émetteur
 // infrarouge du téléphone. Aucun lien avec le PC : elle marche même hors connexion.
 // Chaque appui envoie la trame complète (mode, ventilation, température, swing).
+// Phase 13 : swing corrigé (bit 0 = swing actif) ; les trames sont aussi confiées à Android
+// (minuteur, plage horaire, automatisme) et l'état « allumée ? » est suivi (clim_plan.dart).
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../clim_ir.dart';
+import '../clim_plan.dart';
 import '../theme.dart';
 
 class CarteClim extends StatefulWidget {
@@ -35,13 +38,27 @@ class _CarteClimState extends State<CarteClim> {
     final dispo = await ClimIr.disponible();
     if (!mounted) return;
     setState(() {
-      _mode = ModeClim.values[(p.getInt('clim_mode') ?? 0).clamp(0, ModeClim.values.length - 1).toInt()];
-      _vent = VentClim.values[(p.getInt('clim_vent') ?? 0).clamp(0, VentClim.values.length - 1).toInt()];
+      _mode =
+          ModeClim.values[(p.getInt('clim_mode') ?? 0)
+              .clamp(0, ModeClim.values.length - 1)
+              .toInt()];
+      _vent =
+          VentClim.values[(p.getInt('clim_vent') ?? 0)
+              .clamp(0, VentClim.values.length - 1)
+              .toInt()];
       _temp = (p.getInt('clim_temp') ?? 24).clamp(16, 30).toInt();
       _swing = p.getBool('clim_swing') ?? false;
       if (!dispo) _info = 'This phone has no IR blaster.';
     });
+    _confierTrames(); // Android a besoin des trames pour le minuteur et l'automatisme
   }
+
+  void _confierTrames() => ClimPlan.enregistrerTrames(
+    mode: _mode,
+    vent: _vent,
+    temp: _temp,
+    swing: _swing,
+  );
 
   Future<void> _sauver() async {
     final p = await SharedPreferences.getInstance();
@@ -49,34 +66,70 @@ class _CarteClimState extends State<CarteClim> {
     await p.setInt('clim_vent', _vent.index);
     await p.setInt('clim_temp', _temp);
     await p.setBool('clim_swing', _swing);
+    _confierTrames();
   }
 
-  Future<void> _envoyer(List<int> octets, String nom) async {
+  Future<bool> _envoyer(List<int> octets, String nom) async {
     HapticFeedback.selectionClick();
     final ok = await ClimIr.envoyer(octets);
-    if (!mounted) return;
-    setState(() => _info = ok ? 'Sent: $nom' : 'No IR blaster found on this phone.');
+    if (!mounted) return ok;
+    setState(
+      () => _info = ok ? 'Sent: $nom' : 'No IR blaster found on this phone.',
+    );
+    return ok;
   }
 
   /// Envoie l'état affiché (mode, ventilation, température, swing).
   void _envoyerEtat(String nom) {
     _sauver();
-    _envoyer(ClimIr.trame(mode: _mode, vent: _vent, temp: _temp, swing: _swing), nom);
+    _envoyer(
+      ClimIr.trame(mode: _mode, vent: _vent, temp: _temp, swing: _swing),
+      nom,
+    );
+  }
+
+  /// La touche power est une bascule : après l'envoi, on retourne l'état « allumée ? » supposé.
+  Future<void> _basculer() async {
+    final e = await ClimPlan.etat();
+    final nouveau = e['on'] != true;
+    await ClimPlan.setOn(nouveau);
+    if (mounted) {
+      setState(
+        () => _info = 'Sent: power (AC now assumed ${nouveau ? 'ON' : 'OFF'})',
+      );
+    }
   }
 
   /// Touche marche/arrêt : l'état affiché avec le drapeau « power ».
-  void _power() => _envoyer(
-        ClimIr.trame(mode: _mode, vent: _vent, temp: _temp, swing: _swing, touchePower: true),
-        'power',
-      );
+  Future<void> _power() async {
+    final ok = await _envoyer(
+      ClimIr.trame(
+        mode: _mode,
+        vent: _vent,
+        temp: _temp,
+        swing: _swing,
+        touchePower: true,
+      ),
+      'power',
+    );
+    if (ok) await _basculer();
+  }
 
   /// Appui long sur marche/arrêt : l'autre trame « power » vue pendant la collecte
   /// (Cool, Auto, 16 °C). À essayer si l'appui court ne fait rien.
-  void _powerAlternatif() => _envoyer(
-        ClimIr.trame(
-            mode: ModeClim.cool, vent: VentClim.auto, temp: 16, swing: true, touchePower: true),
-        'power (alt)',
-      );
+  Future<void> _powerAlternatif() async {
+    final ok = await _envoyer(
+      ClimIr.trame(
+        mode: ModeClim.cool,
+        vent: VentClim.auto,
+        temp: 16,
+        swing: true,
+        touchePower: true,
+      ),
+      'power (alt)',
+    );
+    if (ok) await _basculer();
+  }
 
   void _changerTemp(int delta) {
     final t = (_temp + delta).clamp(16, 30).toInt();
@@ -95,8 +148,12 @@ class _CarteClimState extends State<CarteClim> {
           const Titre('Air conditioner', icone: Icons.ac_unit_rounded),
           Row(
             children: [
-              _rond(Icons.power_settings_new_rounded, _power,
-                  onLong: _powerAlternatif, couleur: Couleurs.vert),
+              _rond(
+                Icons.power_settings_new_rounded,
+                _power,
+                onLong: _powerAlternatif,
+                couleur: Couleurs.vert,
+              ),
               const Spacer(),
               _rond(Icons.remove_rounded, () => _changerTemp(-1)),
               SizedBox(
@@ -105,15 +162,23 @@ class _CarteClimState extends State<CarteClim> {
                   '$_temp°',
                   textAlign: TextAlign.center,
                   style: const TextStyle(
-                      fontSize: 34, fontWeight: FontWeight.w900, color: Colors.white),
+                    fontSize: 34,
+                    fontWeight: FontWeight.w900,
+                    color: Colors.white,
+                  ),
                 ),
               ),
               _rond(Icons.add_rounded, () => _changerTemp(1)),
               const Spacer(),
-              _rond(Icons.swap_vert_rounded, () {
-                setState(() => _swing = !_swing);
-                _envoyerEtat(_swing ? 'swing on' : 'swing off');
-              }, couleur: Couleurs.orange, actif: _swing),
+              _rond(
+                Icons.swap_vert_rounded,
+                () {
+                  setState(() => _swing = !_swing);
+                  _envoyerEtat(_swing ? 'swing on' : 'swing off');
+                },
+                couleur: Couleurs.orange,
+                actif: _swing,
+              ),
             ],
           ),
           const SizedBox(height: 14),
@@ -154,10 +219,17 @@ class _CarteClimState extends State<CarteClim> {
     );
   }
 
-  Widget _rond(IconData icone, VoidCallback onTap,
-      {VoidCallback? onLong, Color couleur = Couleurs.cyan, bool actif = false}) {
+  Widget _rond(
+    IconData icone,
+    VoidCallback onTap, {
+    VoidCallback? onLong,
+    Color couleur = Couleurs.cyan,
+    bool actif = false,
+  }) {
     return Material(
-      color: actif ? couleur.withValues(alpha: 0.25) : Colors.white.withValues(alpha: 0.08),
+      color: actif
+          ? couleur.withValues(alpha: 0.25)
+          : Colors.white.withValues(alpha: 0.08),
       shape: const CircleBorder(),
       child: InkWell(
         customBorder: const CircleBorder(),

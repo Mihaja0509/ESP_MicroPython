@@ -5,6 +5,10 @@
     <!-- Phase 12 : émetteur infrarouge du téléphone (permission normale, sans demande à l'écran) -->
     <uses-permission android:name="android.permission.TRANSMIT_IR"/>
     <uses-feature android:name="android.hardware.consumerir" android:required="false"/>
+    <!-- Phase 13 : minuteur, plage horaire et automatisme de la clim (alarmes exactes) -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32"/>
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <application
         android:label="Dadou"
         android:usesCleartextTraffic="true"
@@ -48,6 +52,15 @@
         <receiver
             android:name=".ActionNotification"
             android:exported="false" />
+        <!-- Phase 13 : alarmes de la clim + réarmement au redémarrage -->
+        <receiver
+            android:name=".ClimReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../actions.dart';
+import '../clim_plan.dart';
 import '../connexion.dart';
 import '../etat.dart';
 import '../theme.dart';
@@ -54,6 +55,8 @@ class _EcranControlesState extends State<EcranControles> {
         _carteLuminosite(e),
         const SizedBox(height: 14),
         CarteClim(jeu: e.enJeu),
+        const SizedBox(height: 14),
+        CarteClimPlan(etat: e, jeu: e.enJeu),
         const SizedBox(height: 14),
         _carteLanceur(e),
       ],

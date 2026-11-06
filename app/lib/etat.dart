@@ -54,6 +54,10 @@ class EtatPC {
   final bool ecranNoir; // écran du PC en mode « écran noir »
   final int lumEsp; // luminosité de l'écran de l'ESP32 (5 à 100), -1 = inconnue
   final int rotEsp; // 0 = normal, 180 = écran retourné (Phase 13)
+  final double?
+  pieceT; // température de la pièce (capteur de l'ESP32), null = pas de mesure
+  final int pieceH; // humidité en %, -1 = inconnue
+  final int pieceP; // pression en hPa, -1 = inconnue
   final int ecrans; // nombre d'écrans allumés sur le PC
   final String
   video; // source de la vidéo au premier plan (YouTube, Netflix…), '' si aucune
@@ -90,6 +94,9 @@ class EtatPC {
     this.ecranNoir = false,
     this.lumEsp = -1,
     this.rotEsp = 0,
+    this.pieceT,
+    this.pieceH = -1,
+    this.pieceP = -1,
     this.ecrans = 1,
     this.video = '',
     this.videoTitre = '',
@@ -154,6 +161,9 @@ class EtatPC {
       ecranNoir: m['ecran_noir'] == true,
       lumEsp: _entier(m['lum_esp']),
       rotEsp: _entier(m['rot_esp']) == 180 ? 180 : 0,
+      pieceT: m['piece_t'] is num ? (m['piece_t'] as num).toDouble() : null,
+      pieceH: _entier(m['piece_h']),
+      pieceP: _entier(m['piece_p']),
       ecrans: m['ecrans'] is num ? (m['ecrans'] as num).toInt() : 1,
       video: (m['video'] ?? '').toString(),
       videoTitre: (m['video_titre'] ?? '').toString(),

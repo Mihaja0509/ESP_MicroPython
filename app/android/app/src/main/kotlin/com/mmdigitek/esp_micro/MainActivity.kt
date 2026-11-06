@@ -77,6 +77,54 @@ class MainActivity : FlutterActivity() {
                     else -> resultat.notImplemented()
                 }
             }
+        // Phase 13 : clim programmée (lib/clim_plan.dart, ClimPlan.kt)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "dadou/clim")
+            .setMethodCallHandler { appel, resultat ->
+                val c = applicationContext
+                when (appel.method) {
+                    "trames" -> {
+                        ClimPlan.trames(
+                            c,
+                            appel.argument<Int>("frequence") ?: 38000,
+                            appel.argument<List<Int>>("power") ?: emptyList(),
+                            appel.argument<List<Int>>("dryPower") ?: emptyList(),
+                            appel.argument<String>("mode") ?: "cool",
+                            appel.argument<Int>("temp") ?: 24
+                        )
+                        resultat.success(true)
+                    }
+                    "setOn" -> {
+                        ClimPlan.setOn(c, appel.argument<Boolean>("on") ?: false)
+                        resultat.success(true)
+                    }
+                    "minuteur" -> resultat.success(
+                        ClimPlan.minuteur(c, appel.argument<Int>("duree") ?: 30, appel.argument<Int>("delai") ?: 0)
+                    )
+                    "annulerMinuteur" -> {
+                        ClimPlan.annulerMinuteur(c)
+                        resultat.success(true)
+                    }
+                    "fenetre" -> {
+                        ClimPlan.fenetre(
+                            c,
+                            appel.argument<Boolean>("actif") ?: false,
+                            appel.argument<Int>("de") ?: 0,
+                            appel.argument<Int>("a") ?: 0
+                        )
+                        resultat.success(true)
+                    }
+                    "auto" -> {
+                        ClimPlan.setAuto(c, appel.argument<String>("json") ?: "{}")
+                        resultat.success(true)
+                    }
+                    "publier" -> {
+                        ClimPlan.publier(c)
+                        resultat.success(true)
+                    }
+                    "etat" -> resultat.success(ClimPlan.etat(c))
+                    else -> resultat.notImplemented()
+                }
+            }
         // après une mise à jour de l'app, la vérification reprend toute seule
         val prefs = getSharedPreferences(VeilleurPC.PREFS, Context.MODE_PRIVATE)
         if (prefs.getBoolean("flutter.notif_actif", false)) {

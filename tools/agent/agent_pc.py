@@ -1931,6 +1931,8 @@ class Agent:
         self.arret_fin = 0.0     # heure prévue de l'arrêt du PC (0 = pas d'arrêt)
         self.lum_esp = max(5, min(100, int(charger_preferences().get("lum_esp", 85))))
         self.rot_esp = 180 if int(charger_preferences().get("rot_esp", 0)) == 180 else 0
+        self.piece = {}          # Phase 13 : dernière mesure du capteur (CLIMAT), voir lire_climat
+        self.clim = None         # Phase 13 : état de la clim donné par le téléphone (/clim_maj)
         self.lent["ecrans"] = 1
         self.noir = EcranNoir(fin_de_session=self._fin_de_session)
 
@@ -2013,6 +2015,7 @@ class Agent:
         self.liaison.envoyer(self.dernier_perf)
 
         p = self.precedent
+        piece = self.piece if self.piece and time.time() - self.piece["vu"] < 30 else None
         self.donnees = {
             "cpu": cpu, "ram": ram, "vol": vol, "bat": bat, "chg": charge,
             "gpu_temp": t, "gpu_charge": u, "vram": mem,
@@ -2034,6 +2037,10 @@ class Agent:
             "inactif": int(p.get("INACTIF", "0") or 0),
             "jeu_total": p.get("JEU_TOTAL", -1),
             "master_v": self.master.version, "master_actif": self.master.actif,
+            # Phase 13 : capteur de la pièce (null / -1 = pas de mesure)
+            "piece_t": piece["t"] if piece else None,
+            "piece_h": piece["h"] if piece else -1,
+            "piece_p": piece["p"] if piece else -1,
         }
         return tour + 1
 
@@ -2118,6 +2125,13 @@ class Agent:
         if self.precedent.get("ROT_ESP") != self.rot_esp:
             self.precedent["ROT_ESP"] = self.rot_esp
             self.liaison.envoyer(f"ROT_ESP {self.rot_esp}")
+        c = self.clim
+        if c:
+            reste = max(0, int((c["fin"] - time.time()) / 60) + 1) if c["fin"] else 0
+            ligne = "CLIM %d %s %d %d %d" % (c["on"], c["mode"], c["temp"], reste, c["auto"])
+            if self.precedent.get("CLIM") != ligne:
+                self.precedent["CLIM"] = ligne
+                self.liaison.envoyer(ligne)
         reste = self.arret_reste()
         if self.precedent.get("ARRET") != (reste > 0):
             self.precedent["ARRET"] = reste > 0
@@ -2410,8 +2424,42 @@ class Agent:
             "master_afficher": self.master_afficher,
             "jeux": self.jeux_pour_app, "jeux_maj": self.jeux_maj, "pas_un_jeu": self.pas_un_jeu,
             "etat_court": self.etat_court,
+            "piece": self.piece_pour_app, "clim_maj": self.clim_maj,
             "sites": self.sites_pour_app, "sites_maj": self.sites_maj,
         }
+
+    def lire_climat(self, ligne):
+        """CLIMAT t10 humidité pression : mesure du capteur branché sur l'ESP32 (t10 = 10 × °C)."""
+        try:
+            t10, h, p = [int(x) for x in ligne.split()[1:4]]
+        except ValueError:
+            return
+        self.piece = {"t": t10 / 10.0, "h": h, "p": p, "vu": time.time()}
+
+    def piece_pour_app(self):
+        """Pour /clim_mesure et l'app : la mesure, ou ok=False si elle a plus de 30 s."""
+        p = self.piece
+        if not p or time.time() - p["vu"] > 30:
+            return {"ok": False}
+        return {"ok": True, "t": p["t"], "h": p["h"], "p": p["p"], "age": round(time.time() - p["vu"])}
+
+    def clim_maj(self, d):
+        """État de la clim poussé par le téléphone : on, mode, temp, reste (min), auto."""
+        try:
+            mode = str(d.get("mode", "cool"))
+            if mode not in ("cool", "dry", "fan", "auto"):
+                mode = "cool"
+            reste = max(0, min(999, int(float(d.get("reste", 0)))))
+            self.clim = {
+                "on": 1 if str(d.get("on", "0")) == "1" else 0,
+                "mode": mode,
+                "temp": max(16, min(30, int(float(d.get("temp", 24))))),
+                "fin": time.time() + reste * 60 if reste > 0 else 0,
+                "auto": 1 if str(d.get("auto", "0")) == "1" else 0,
+            }
+        except (TypeError, ValueError):
+            return
+        self.precedent.pop("CLIM", None)  # renvoie la ligne à l'ESP32 au prochain tour
 
     def boucle_lecture(self):
         while self.actif:
@@ -2427,6 +2475,9 @@ class Agent:
             ligne = self.liaison.lire_ligne()
             if ligne is None:
                 time.sleep(0.5)
+                continue
+            if ligne.startswith("CLIMAT "):  # mesure du capteur : pas dans le journal
+                self.lire_climat(ligne)
                 continue
             if ligne and ligne != "OK":
                 print(f"[esp32] {ligne}")
