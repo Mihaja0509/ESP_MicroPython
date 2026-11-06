@@ -20,6 +20,7 @@ RACINE = Path(__file__).resolve().parent.parent
 ESP = RACINE / "esp"
 SORTIE = RACINE / "tools" / "assets" / "apercus"
 W, H = 320, 172
+CARTE_DROITE = 185   # dernier pixel de la carte
 
 
 # ------------------------------------------------------------------ faux framebuf (numpy)
@@ -109,13 +110,14 @@ sys.modules["framebuf"] = framebuf
 # ------------------------------------------------------------------ horloge et heure simulées
 class Horloge:
     ms = 0
+    h, m = 17, 48      # heure affichée (modifiable par scénario)
 
 
 time.ticks_ms = lambda: Horloge.ms
 time.ticks_diff = lambda a, b: a - b
 time.ticks_add = lambda a, b: a + b
 HEURE = (2026, 11, 6, 17, 48, 30, 4, 310)
-time.localtime = lambda *a: HEURE
+time.localtime = lambda *a: (HEURE[0], HEURE[1], HEURE[2], Horloge.h, Horloge.m, HEURE[5], HEURE[6], HEURE[7])
 
 os.chdir(ESP)
 sys.path.insert(0, str(ESP / "lib"))
@@ -195,6 +197,11 @@ def verifier(interface, nom):
                 problemes.append(
                     f"chevauchement : {e1[1]!r} ({noms[id(e1[0])]} @{e1[2]},{e1[3]}) / "
                     f"{e2[1]!r} ({noms[id(e2[0])]} @{e2[2]},{e2[3]})")
+    # scènes normale / calme / nuit : le bloc pièce à droite de l'heure garde 12 px avant le bord de la carte
+    if nom.split("_")[0] in ("normal", "calme", "nuit"):
+        for e, m, d in masques:
+            if e[3] < 60 and e[2] >= 100 and m.any() and np.nonzero(m)[1].max() > CARTE_DROITE - 12:
+                problemes.append(f"marge < 12 px au bord droit : {e[1]!r} jusqu'à x={np.nonzero(m)[1].max()}")
     return problemes
 
 
@@ -233,6 +240,14 @@ def scenarios():
     liste.append(("normal_clim_froide_trop_chaude",
                   lambda: normal(piece=(30.2, 71.0, 997)), (1000, 6000)))
 
+    # pire cas : heure la plus large (00:00 = 121 px) ou la plus étroite (11:11), température à 2 chiffres
+    # + une décimale, humidité à 3 chiffres
+    liste.append(("normal_pire_heure_large", lambda: normal(piece=(31.4, 100.0, 997), clim=clim(reste=600, auto=True)),
+                  (1000, 6000), (0, 0)))
+    liste.append(("normal_pire_heure_etroite", lambda: normal(piece=(31.4, 100.0, 997)), (1000,), (11, 11)))
+    liste.append(("normal_sans_mesure_heure_large", lambda: normal(), (1000,), (0, 0)))
+    liste.append(("normal_negatif", lambda: normal(piece=(-5.2, 100.0, 997)), (1000,), (0, 0)))
+
     def calme(**kw):
         e = normal(**kw)
         e["evt"] = dict(e["evt"], inactif=31)
@@ -244,6 +259,10 @@ def scenarios():
         e = normal(**kw)
         e["evt"] = dict(e["evt"], verrou=1)
         return e
+    liste.append(("calme_pire_heure_large", lambda: calme(piece=(31.4, 100.0, 997), clim=clim(reste=600)),
+                  (1000, 6000), (0, 0)))
+    liste.append(("nuit_pire_heure_large", lambda: nuit(piece=(31.4, 100.0, 997), clim=clim(reste=2700, auto=True)),
+                  (1000,), (0, 0)))
     liste.append(("nuit_sans_clim", lambda: nuit(), (1000,)))
     liste.append(("nuit_clim", lambda: nuit(clim=clim(reste=2700, auto=True), piece=(24.1, 58.0, 997)), (1000,)))
 
@@ -270,7 +289,8 @@ def main():
         return
     SORTIE.mkdir(parents=True, exist_ok=True)
     total = 0
-    for nom, fabrique, instants in scenarios():
+    for nom, fabrique, instants, *heure in scenarios():
+        Horloge.h, Horloge.m = heure[0] if heure else (17, 48)
         for k, t in enumerate(instants):
             ecran = EcranFaux()
             interface = ui.Interface(ecran)

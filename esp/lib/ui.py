@@ -18,6 +18,7 @@ from polices import Police, rgb565
 
 DOSSIER = "assets/"
 W, H = 320, 172
+CARTE_DROITE = 185   # dernier pixel de la carte (fonds générés : carte de x = 7 à 185)
 PERSO_W, PERSO_H = 95, 150
 PERSO_X, PERSO_Y = W - PERSO_W - 12, H - PERSO_H - 6
 CLE = rgb565(255, 0, 255)  # magenta = transparent dans les images
@@ -521,28 +522,37 @@ class Interface:
         return "Room %.1f° • %d %%" % (piece[0], piece[1])
 
     def _coin_clim(self, etat, carte, y=8, discret=False, maintenant=0):
-        """À droite de l'heure : température et humidité de la pièce, en permanence (« --° » sans mesure).
-        discret=True (scènes calme et nuit) : plus petit, avec l'état de la clim en dessous."""
+        """Température et humidité de la pièce juste après l'heure (« --° » sans mesure), en permanence.
+        Le bloc est collé à l'heure réelle (largeur de f_heure) et garde 12 px de marge avant le bord
+        droit de la carte ; on prend la plus grande police qui tient. discret=True (scènes calme et
+        nuit) : plus petit, avec l'état de la clim en dessous (version courte s'il manque de la place)."""
         fb = self.fb
         piece = etat.get("piece")
-        droite = 186
+        lt = time.localtime()
+        heure = "%02d:%02d" % (lt[3], lt[4]) if lt[0] >= 2025 else "--:--"
+        gauche = 16 + self.f_heure.largeur(heure) + 6   # collé à l'heure
+        droite = CARTE_DROITE - 12                      # marge de 12 px au bord droit de la carte
+        temp = ("%.1f°" % piece[0]) if piece else "--°"
+        hum = ("%d %%" % piece[1]) if piece else None
+        polices = (self.f_s, self.f_xs) if discret else (self.f_m, self.f_s, self.f_xs)
+        police = polices[-1]
+        for p in polices:
+            if gauche + max(p.largeur(temp), p.largeur(hum) if hum else 0) <= droite:
+                police = p
+                break
+        ligne = y + 2
+        police.ecrire(fb, temp, gauche, ligne, DOUX if (piece and discret) else (BLANC if piece else GRIS), carte)
+        ligne += police.hauteur + 3
+        if hum:
+            police.ecrire(fb, hum, gauche, ligne, GRIS if discret else DOUX, carte)
+            ligne += police.hauteur + 3
         if not discret:
-            texte = ("%.1f°" % piece[0]) if piece else "--°"
-            self.f_m.ecrire(fb, texte, droite - self.f_m.largeur(texte), y + 2,
-                            BLANC if piece else GRIS, carte)
-            if piece:
-                texte = "%d %%" % piece[1]
-                self.f_m.ecrire(fb, texte, droite - self.f_m.largeur(texte), y + 24, DOUX, carte)
             return
-        texte = ("%.1f°" % piece[0]) if piece else "--°"
-        self.f_s.ecrire(fb, texte, droite - self.f_s.largeur(texte), y + 2, DOUX if piece else GRIS, carte)
-        if piece:
-            texte = "%d %%" % piece[1]
-            self.f_xs.ecrire(fb, texte, droite - self.f_xs.largeur(texte), y + 19, GRIS, carte)
         ac = self._ac_mini(etat, maintenant)
         if ac:
-            self.f_xs.ecrire(fb, ac, droite - self.f_xs.largeur(ac), y + 34,
-                             CYAN if ac != "AC off" else GRIS, carte)
+            if gauche + self.f_xs.largeur(ac) > droite:  # pas la place : « AC 23m » -> « 23m »
+                ac = ac[3:] if ac.startswith("AC ") else ac
+            self.f_xs.ecrire(fb, ac, gauche, ligne, CYAN if "off" not in ac else GRIS, carte)
 
     def _bandeau_clim(self, texte, y, carte):
         """Petite ligne discrète avec l'icône thermomètre (ligne du bas de la scène)."""
