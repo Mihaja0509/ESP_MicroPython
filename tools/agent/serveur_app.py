@@ -74,6 +74,8 @@ class ServeurApp:
         self.essais = 0
         self.clients = 0
         self.probleme = ""
+        # Phase 13 : mesures pour la souris (voir _veille_boucle)
+        self.stats = {"n": 0, "ecart": 0.0, "boucle": 0.0, "appel": 0.0, "dernier": 0.0}
 
     # ------------------------------------------------------------ appareils
     def _appareils(self):
@@ -125,6 +127,7 @@ class ServeurApp:
         async with serve(self._client, "0.0.0.0", PORT, ping_interval=20, ping_timeout=20,
                          max_size=65536, process_request=self._http):
             print(f"[agent] serveur app prêt sur le port {PORT}")
+            asyncio.create_task(self._veille_boucle())
             await asyncio.Future()
 
     async def _http(self, connexion, requete):
@@ -169,6 +172,41 @@ class ServeurApp:
     async def _envoyer(self, ws, donnees):
         await ws.send(json.dumps(donnees, ensure_ascii=False))
 
+    async def _appel(self, nom, *args):
+        """Appelle une fonction de l'agent dans un fil à part : la boucle réseau (et donc la
+        souris) ne reste jamais bloquée par une lecture de fichier."""
+        return await asyncio.get_running_loop().run_in_executor(None, self.r[nom], *args)
+
+    def _noter_souris(self, dx, dy):
+        s = self.stats
+        t0 = time.perf_counter()
+        if s["dernier"] and t0 - s["dernier"] < 1.0:  # même geste : plus grand silence entre 2 messages
+            s["ecart"] = max(s["ecart"], t0 - s["dernier"])
+        s["dernier"] = t0
+        self.r["souris"](dx, dy)
+        s["appel"] = max(s["appel"], time.perf_counter() - t0)
+        s["n"] += 1
+
+    async def _veille_boucle(self):
+        """Souris saccadée ? Mesure ce qui coince : boucle réseau bloquée, silence du téléphone
+        ou SendInput lent. Une ligne dans agent.log toutes les 10 s, seulement si on s'est servi
+        de la souris."""
+        s = self.stats
+        attendu = time.perf_counter() + 0.05
+        debut = time.monotonic()
+        while True:
+            await asyncio.sleep(0.05)
+            maintenant = time.perf_counter()
+            s["boucle"] = max(s["boucle"], maintenant - attendu)
+            attendu = maintenant + 0.05
+            if time.monotonic() - debut >= 10:
+                if s["n"]:
+                    print("[agent] souris : %d msg / 10 s, ecart max %d ms, boucle max %d ms, "
+                          "SendInput max %d ms" % (s["n"], s["ecart"] * 1000, s["boucle"] * 1000,
+                                                   s["appel"] * 1000))
+                s.update(n=0, ecart=0.0, boucle=0.0, appel=0.0)
+                debut = time.monotonic()
+
     async def _pousser_etat(self, ws):
         while True:
             await self._envoyer(ws, {"type": "etat", **self.r["etat"]()})
@@ -210,7 +248,7 @@ class ServeurApp:
                         tache_etat = asyncio.create_task(self._pousser_etat(ws))
                     continue
                 if typ == "souris":
-                    self.r["souris"](int(m.get("dx", 0)), int(m.get("dy", 0)))
+                    self._noter_souris(int(m.get("dx", 0)), int(m.get("dy", 0)))
                 elif typ == "clic":
                     self.r["clic"](m.get("bouton", "gauche"))
                 elif typ == "molette":
@@ -218,7 +256,7 @@ class ServeurApp:
                 elif typ == "texte":
                     await boucle.run_in_executor(None, self.r["texte"], str(m.get("texte", ""))[:500])
                 elif typ == "apps":
-                    await self._envoyer(ws, {"type": "apps", "apps": self.r["apps"]()})
+                    await self._envoyer(ws, {"type": "apps", "apps": (await self._appel("apps"))})
                 elif typ in ("app_ajout", "app_retrait"):
                     if typ == "app_ajout":
                         ok, texte = await boucle.run_in_executor(
@@ -228,9 +266,9 @@ class ServeurApp:
                         ok, texte = await boucle.run_in_executor(
                             None, self.r["retirer_app"], str(m.get("nom", "")))
                     await self._envoyer(ws, {"type": "rep", "ligne": typ, "texte": texte, "ok": ok})
-                    await self._envoyer(ws, {"type": "apps", "apps": self.r["apps"]()})
+                    await self._envoyer(ws, {"type": "apps", "apps": (await self._appel("apps"))})
                 elif typ == "raccourcis":
-                    await self._envoyer(ws, {"type": "raccourcis", "raccourcis": self.r["raccourcis"]()})
+                    await self._envoyer(ws, {"type": "raccourcis", "raccourcis": (await self._appel("raccourcis"))})
                 elif typ in ("rac_ajout", "rac_retrait"):
                     if typ == "rac_ajout":
                         ok, texte = await boucle.run_in_executor(
@@ -240,22 +278,22 @@ class ServeurApp:
                         ok, texte = await boucle.run_in_executor(
                             None, self.r["retirer_raccourci"], str(m.get("nom", "")))
                     await self._envoyer(ws, {"type": "rep", "ligne": typ, "texte": texte, "ok": ok})
-                    await self._envoyer(ws, {"type": "raccourcis", "raccourcis": self.r["raccourcis"]()})
+                    await self._envoyer(ws, {"type": "raccourcis", "raccourcis": (await self._appel("raccourcis"))})
                 elif typ == "apercu":
                     if not etat_client["apercu"]:  # sinon on attend la fin de l'image en cours
                         etat_client["apercu"] = True
                         asyncio.create_task(self._apercu(ws, m, etat_client))
                 elif typ == "master":
-                    await self._envoyer(ws, {"type": "master", **self.r["master"]()})
+                    await self._envoyer(ws, {"type": "master", **(await self._appel("master"))})
                 elif typ == "master_maj":
                     ok, texte = await boucle.run_in_executor(None, self.r["master_maj"], m.get("master"))
                     await self._envoyer(ws, {"type": "rep", "ligne": typ, "texte": texte, "ok": ok})
-                    await self._envoyer(ws, {"type": "master", **self.r["master"]()})
+                    await self._envoyer(ws, {"type": "master", **(await self._appel("master"))})
                 elif typ == "master_afficher":
                     ok, texte = self.r["master_afficher"]()
                     await self._envoyer(ws, {"type": "rep", "ligne": typ, "texte": texte, "ok": ok})
                 elif typ == "jeux":
-                    await self._envoyer(ws, {"type": "jeux", **self.r["jeux"]()})
+                    await self._envoyer(ws, {"type": "jeux", **(await self._appel("jeux"))})
                 elif typ in ("jeux_maj", "pas_un_jeu"):
                     if typ == "jeux_maj":
                         ok, texte = await boucle.run_in_executor(
@@ -263,13 +301,13 @@ class ServeurApp:
                     else:
                         ok, texte = await boucle.run_in_executor(None, self.r["pas_un_jeu"])
                     await self._envoyer(ws, {"type": "rep", "ligne": typ, "texte": texte, "ok": ok})
-                    await self._envoyer(ws, {"type": "jeux", **self.r["jeux"]()})
+                    await self._envoyer(ws, {"type": "jeux", **(await self._appel("jeux"))})
                 elif typ == "sites":
-                    await self._envoyer(ws, {"type": "sites", **self.r["sites"]()})
+                    await self._envoyer(ws, {"type": "sites", **(await self._appel("sites"))})
                 elif typ == "sites_maj":
                     ok, texte = await boucle.run_in_executor(None, self.r["sites_maj"], m.get("sites"))
                     await self._envoyer(ws, {"type": "rep", "ligne": typ, "texte": texte, "ok": ok})
-                    await self._envoyer(ws, {"type": "sites", **self.r["sites"]()})
+                    await self._envoyer(ws, {"type": "sites", **(await self._appel("sites"))})
                 elif typ == "pointeur":
                     await boucle.run_in_executor(
                         None, self.r["pointeur"], int(m.get("ecran", 0)), float(m.get("x", 0)),

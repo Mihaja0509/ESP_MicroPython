@@ -17,9 +17,13 @@ class EcranSouris extends StatefulWidget {
 class _EcranSourisState extends State<EcranSouris> {
   final Map<int, Offset> _doigts = {};
   DateTime _debut = DateTime.now();
-  bool _bouge = false;
+  Offset _depart = Offset.zero; // où le premier doigt a touché l'écran
+  bool _bouge = false; // le doigt est sorti de la zone de tap
   bool _deuxDoigts = false;
+  bool _aDefile = false; // le geste à deux doigts a vraiment fait défiler
   double _defilement = 0;
+  static const double _tolerance =
+      8; // pixels : en dessous, c'est un tap, le curseur ne bouge pas
   final _champ = TextEditingController();
   bool _entreeAuto = false;
   double _sensibilite = 1.8;
@@ -37,8 +41,11 @@ class _EcranSourisState extends State<EcranSouris> {
     _doigts[e.pointer] = e.position;
     if (_doigts.length == 1) {
       _debut = DateTime.now();
+      _depart = e.position;
       _bouge = false;
       _deuxDoigts = false;
+      _aDefile = false;
+      _defilement = 0;
     } else {
       _deuxDoigts = true;
     }
@@ -52,13 +59,24 @@ class _EcranSourisState extends State<EcranSouris> {
       while (_defilement.abs() >= 16) {
         final sens = _defilement > 0 ? 1 : -1;
         cx.molette(sens);
+        _aDefile = true;
         _defilement -= 16 * sens;
       }
+      return;
+    }
+    // un seul doigt resté après un geste à deux doigts : on attend qu'il se lève
+    if (_deuxDoigts) return;
+    if (!_bouge) {
+      final r = e.position - _depart;
+      if (r.distance <= _tolerance) {
+        return; // peut-être un tap : le curseur reste en place
+      }
       _bouge = true;
+      // le geste devient un déplacement : on rattrape la distance déjà parcourue
+      cx.souris(r.dx * _sensibilite, r.dy * _sensibilite);
       return;
     }
     final d = e.delta;
-    if (d.distance > 1.5) _bouge = true;
     // accélération : les gestes rapides vont plus loin
     final acc = 1 + (d.distance / 12).clamp(0.0, 1.5).toDouble();
     cx.souris(d.dx * _sensibilite * acc, d.dy * _sensibilite * acc);
@@ -68,14 +86,26 @@ class _EcranSourisState extends State<EcranSouris> {
     _doigts.remove(e.pointer);
     if (_doigts.isNotEmpty) return;
     final duree = DateTime.now().difference(_debut);
-    if (_bouge) return;
     if (_deuxDoigts) {
-      _clic('droit');
-    } else if (duree < const Duration(milliseconds: 250)) {
-      _clic('gauche');
-    } else if (duree > const Duration(milliseconds: 500)) {
-      _clic('droit');
+      // tap à deux doigts = clic droit, sauf s'il y a eu défilement
+      if (!_aDefile && duree < const Duration(milliseconds: 400)) {
+        _clic('droit');
+      }
+    } else if (!_bouge) {
+      if (duree < const Duration(milliseconds: 250)) {
+        _clic('gauche');
+      } else if (duree > const Duration(milliseconds: 500)) {
+        _clic('droit');
+      }
     }
+    _deuxDoigts = false;
+  }
+
+  void _annule(PointerCancelEvent e) {
+    _doigts.remove(e.pointer);
+    _bouge = true; // un geste annulé ne doit jamais devenir un clic
+    _aDefile = true;
+    if (_doigts.isEmpty) _deuxDoigts = false;
   }
 
   void _clic(String bouton) {
@@ -114,56 +144,69 @@ class _EcranSourisState extends State<EcranSouris> {
   }
 
   Widget _pave() {
-    return Listener(
-      onPointerDown: _bas,
-      onPointerMove: _deplace,
-      onPointerUp: _haut,
-      onPointerCancel: (e) => _doigts.remove(e.pointer),
-      child: Container(
-        width: double.infinity,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(24),
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Couleurs.cyan.withValues(alpha: 0.10), Couleurs.magenta.withValues(alpha: 0.10)],
-          ),
-          border: Border.all(color: Couleurs.cyan.withValues(alpha: 0.45), width: 1.5),
-        ),
-        child: Stack(
-          children: [
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.all(24),
-                child: Text(
-                  'Slide a finger to move the mouse\nTap = click · Long press = right click\n'
-                  'Two fingers = scroll · Two-finger tap = right click',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Couleurs.gris, fontSize: 13, height: 1.5),
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: Listener(
+            behavior: HitTestBehavior.opaque,
+            onPointerDown: _bas,
+            onPointerMove: _deplace,
+            onPointerUp: _haut,
+            onPointerCancel: _annule,
+            child: Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(24),
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Couleurs.cyan.withValues(alpha: 0.10),
+                    Couleurs.magenta.withValues(alpha: 0.10),
+                  ],
+                ),
+                border: Border.all(
+                  color: Couleurs.cyan.withValues(alpha: 0.45),
+                  width: 1.5,
+                ),
+              ),
+              child: const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Text(
+                    'Slide a finger to move the mouse\nTap = click · Long press = right click\n'
+                    'Two fingers = scroll · Two-finger tap = right click',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Couleurs.gris,
+                      fontSize: 13,
+                      height: 1.5,
+                    ),
+                  ),
                 ),
               ),
             ),
-            Positioned(
-              right: 8,
-              top: 4,
-              child: Row(
-                children: [
-                  const Icon(Icons.speed_rounded, size: 16, color: Couleurs.gris),
-                  SizedBox(
-                    width: 120,
-                    child: Slider(
-                      value: _sensibilite,
-                      min: 0.8,
-                      max: 3.5,
-                      onChanged: (v) => setState(() => _sensibilite = v),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
+          ),
         ),
-      ),
+        // le réglage de sensibilité est HORS de la zone tactile (sinon il déplaçait la souris)
+        Positioned(
+          right: 8,
+          top: 4,
+          child: Row(
+            children: [
+              const Icon(Icons.speed_rounded, size: 16, color: Couleurs.gris),
+              SizedBox(
+                width: 120,
+                child: Slider(
+                  value: _sensibilite,
+                  min: 0.8,
+                  max: 3.5,
+                  onChanged: (v) => setState(() => _sensibilite = v),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
@@ -177,7 +220,13 @@ class _EcranSourisState extends State<EcranSouris> {
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 16),
           child: Center(
-            child: Text(texte, style: const TextStyle(fontWeight: FontWeight.w700, color: Couleurs.doux)),
+            child: Text(
+              texte,
+              style: const TextStyle(
+                fontWeight: FontWeight.w700,
+                color: Couleurs.doux,
+              ),
+            ),
           ),
         ),
       ),
@@ -251,10 +300,7 @@ class _EcranSourisState extends State<EcranSouris> {
                   ('Win', 'KEY win'),
                   ('F5', 'KEY f5'),
                   ('F11', 'KEY f11'),
-                ]) ...[
-                  _touche(t, c),
-                  const SizedBox(width: 6),
-                ],
+                ]) ...[_touche(t, c), const SizedBox(width: 6)],
               ],
             ),
           ),

@@ -2463,6 +2463,7 @@ def main():
     parser.add_argument("--service", action="store_true",
                         help="sans console : tourne en fond, écrit dans agent.log")
     args = parser.parse_args()
+    sys.setswitchinterval(0.002)  # Phase 13 : les fils se passent la main plus souvent (souris plus fluide)
 
     # Pixels réels sur chaque écran (écran noir et aperçu justes même avec la mise à l'échelle)
     try:
