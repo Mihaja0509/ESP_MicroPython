@@ -7,6 +7,7 @@
 # échéance en J-x, objectif du jour, lecture, rédaction, dernier résultat de mesure ou réunion.
 # Elle s'affiche : briefing du matin (60 s), 20 s toutes les 5 min pendant le travail de recherche,
 # 1 suggestion sur 3 de la scène calme (15 s), et 15 s après un événement (MASTER_INFO).
+# Phase 13 : clim (AC), climat de la pièce (capteur), flocons / gouttes / traits d'air autour de la mascotte.
 import math
 import random
 import time
@@ -59,6 +60,9 @@ PAUSE_JEU_MS = 2 * 3600 * 1000   # rappel « petite pause ? » toutes les 2 h de
 CHAUFFE_GPU = 83           # °C
 CHAUFFE_CPU = 92           # °C
 CHAUFFE_RAPPEL_MS = 5 * 60 * 1000
+PIECE_CHAUDE = 29          # °C : la mascotte transpire si la pièce est plus chaude et la clim éteinte
+PIECE_SUGGERE = 28         # °C : la scène calme propose d'allumer la clim
+PIECE_HUMIDE = 75          # % : la scène calme propose le mode Dry
 BRIEFING_MS = 60000        # scène master au premier usage du jour (après 6 h)
 TRAVAIL_CYCLE_MS = 300000  # pendant le travail de recherche : 20 s toutes les 5 min
 TRAVAIL_MONTRE_MS = 20000
@@ -164,6 +168,7 @@ class Interface:
         self.dernier_jeu = ""    # pour proposer « Reprendre … ? » dans la scène calme
         self.chaud = False
         self.bulle_calme = None  # icône de la suggestion affichée (scène calme)
+        self.piece_chaude = False  # Phase 13 : pièce trop chaude et clim éteinte (sueur de la mascotte)
         # Phase 11 : scène master
         self.base = None          # scène « de fond » (normale, calme…) sans la scène master
         self.base_depuis = time.ticks_ms()
@@ -247,6 +252,9 @@ class Interface:
     # ------------------------------------------------------------------ dessin
     def dessiner(self, etat, maintenant):
         self.lum = etat.get("lum", 85)
+        piece = etat.get("piece")
+        clim = etat.get("clim")
+        self.piece_chaude = bool(piece) and piece[0] >= PIECE_CHAUDE and not (clim and clim["on"])
         mode = self._choisir_mode(etat, maintenant)
         if mode != self.mode:
             self._changer_mode(self.mode, mode, etat, maintenant)
@@ -442,6 +450,103 @@ class Interface:
                 fb.fill_rect(x, int(p[1]), taille, taille, couleurs[0 if taille == 2 else 1])
 
     # ------------------------------------------------------------------ scènes
+    # ------------------------------------------------------------------ clim et pièce (Phase 13)
+    def _clim_actif(self, etat):
+        c = etat.get("clim")
+        return c if c and c["on"] else None
+
+    def _texte_clim(self, etat, maintenant):
+        """« AC Cool 24° • off in 23 min • auto », ou None si la clim est éteinte / inconnue."""
+        c = self._clim_actif(etat)
+        if not c:
+            return None
+        noms = {"cool": "Cool", "dry": "Dry", "fan": "Fan", "auto": "Auto"}
+        texte = "AC %s %d°" % (noms.get(c["mode"], "Cool"), c["temp"])
+        reste = c["reste"] - time.ticks_diff(maintenant, c["recu"]) // 60000
+        if c["reste"] > 0 and reste > 0:
+            texte += " • off in %s" % duree_texte(reste)
+        if c["auto"]:
+            texte += " • auto"
+        return texte
+
+    def _texte_piece(self, etat):
+        piece = etat.get("piece")
+        if not piece:
+            return None
+        return "Room %.1f° • %d %%" % (piece[0], piece[1])
+
+    def _coin_clim(self, etat, carte, y=8):
+        """Coin haut droit : état de la clim (AC 24°) et climat de la pièce (24.1° 58 %)."""
+        fb = self.fb
+        libre = 186 - (16 + self.f_heure.largeur("88:88") + 10)  # place à droite de l'heure
+        c = etat.get("clim")
+        if c:
+            texte = ("AC %d°" % c["temp"]) if c["on"] else "AC off"
+            if self.f_s.largeur(texte) <= libre:
+                self.f_s.ecrire(fb, texte, 186 - self.f_s.largeur(texte), y + 2,
+                                CYAN if c["on"] else GRIS, carte)
+        piece = etat.get("piece")
+        if piece:
+            texte = "%.1f° %d %%" % (piece[0], piece[1])
+            if self.f_xs.largeur(texte) <= libre:
+                self.f_xs.ecrire(fb, texte, 186 - self.f_xs.largeur(texte), y + 22, DOUX, carte)
+
+    def _ligne_bas(self, etat, carte, maintenant):
+        """Ligne du bas de la scène normale : PC (batterie, casque), puis clim et pièce
+        quand il y en a, en alternance toutes les 5 s."""
+        extras = [t for t in (self._texte_clim(etat, maintenant), self._texte_piece(etat)) if t]
+        phase = (maintenant // 5000) % (1 + len(extras))
+        if phase == 0:
+            self._ligne_bas_pc(etat, carte)
+            return
+        texte = extras[phase - 1]
+        self.fb.blit(self.icones["thermo"], 14, 145, CLE)
+        self.f_xs.ecrire(self.fb, self.f_xs.couper(texte, 150), 36, 147,
+                         CYAN if texte.startswith("AC") else DOUX, carte)
+
+    def _ligne_bas_pc(self, etat, carte):
+        fb = self.fb
+        st = etat["stat"]
+        x = 16
+        if st["bat"] >= 0:
+            if st["chg"]:
+                fb.blit(self.ico_eclair, x, 147, CLE)
+                x += 13
+            couleur_bat = ROUGE if st["bat"] < 20 and not st["chg"] else DOUX
+            x = self.f_xs.ecrire(fb, "%d %%" % st["bat"], x, 147, couleur_bat, carte) + 8
+        if etat["evt"]["casque"]:
+            fb.blit(self.ico_casque, x, 147, CLE)
+            nom = self.f_xs.couper(etat["evt"]["casque"], 176 - x - 14)
+            self.f_xs.ecrire(fb, nom, x + 14, 147, CYAN, carte)
+
+    def _flocon(self, x, y, ph):
+        lum = int(255 * min(1.0, (1 - ph) * 1.6))
+        c = rgb565(lum, lum, 255)
+        fb = self.fb
+        fb.hline(x - 2, y, 5, c)
+        fb.vline(x, y - 2, 5, c)
+        for dx, dy in ((-1, -1), (1, 1), (-1, 1), (1, -1)):
+            fb.pixel(x + dx, y + dy, c)
+
+    def _effets_clim(self, etat, t):
+        """Autour de la mascotte quand la clim tourne : flocons (Cool), gouttes (Dry),
+        traits d'air (Fan / Auto). Dessiné AVANT la mascotte : elle reste devant."""
+        c = self._clim_actif(etat)
+        if not c:
+            return
+        fb = self.fb
+        for i in range(4):
+            ph = (t * 0.45 + i / 4) % 1
+            x = PERSO_X + 6 + i * 24 + int(math.sin(t * 1.3 + i * 2) * 4)
+            y = 4 + int(ph * (PERSO_H - 10))
+            if c["mode"] == "dry":
+                fb.blit(self.goutte, x, y, CLE)
+            elif c["mode"] == "cool":
+                self._flocon(x, y, ph)
+            else:
+                xl = PERSO_X - 10 + int(ph * 90)
+                fb.hline(xl, 20 + i * 14, 10, rgb565(150, 200, 235))
+
     def _heure_date(self, carte, y_heure=8):
         lt = time.localtime()
         if lt[0] >= 2025:
@@ -474,6 +579,7 @@ class Interface:
     def _scene_normale(self, etat, carte, maintenant):
         fb = self.fb
         secondes = self._heure_date(carte)
+        self._coin_clim(etat, carte)
         fb.fill_rect(18, 76, 158, 3, rgb565(45, 40, 80))
         fb.fill_rect(18, 76, 158 * secondes // 59, 3, rgb565(*CYAN))
         if self._meteo_visible(etat):
@@ -490,18 +596,8 @@ class Interface:
                 h = 5 + i * 4
                 allume = vol >= (i + 1) * 20 - 10
                 fb.fill_rect(140 + i * 7, 122 - h, 5, h, rgb565(*CYAN) if allume else rgb565(50, 46, 84))
-        # ligne du bas : batterie + casque
-        x = 16
-        if st["bat"] >= 0:
-            if st["chg"]:
-                fb.blit(self.ico_eclair, x, 147, CLE)
-                x += 13
-            couleur_bat = ROUGE if st["bat"] < 20 and not st["chg"] else DOUX
-            x = self.f_xs.ecrire(fb, "%d %%" % st["bat"], x, 147, couleur_bat, carte) + 8
-        if etat["evt"]["casque"]:
-            fb.blit(self.ico_casque, x, 147, CLE)
-            nom = self.f_xs.couper(etat["evt"]["casque"], 176 - x - 14)
-            self.f_xs.ecrire(fb, nom, x + 14, 147, CYAN, carte)
+        # ligne du bas : PC (batterie, casque), clim, pièce — en alternance
+        self._ligne_bas(etat, carte, maintenant)
 
     def _meteo_compacte(self, etat, carte):
         """Météo d'aujourd'hui et de demain sous l'heure (scène normale, 2 min toutes les 10 min)."""
@@ -616,6 +712,9 @@ class Interface:
         total = etat["perf"].get("total", -1)
         if total >= 1:
             textes.append("Game total: %s" % duree_texte(total))
+        for extra in (self._texte_clim(etat, maintenant), self._texte_piece(etat)):
+            if extra:
+                textes.append(extra)
         if textes:
             texte = textes[(time.ticks_ms() // 5000) % len(textes)]
             self.f_xs.ecrire(fb, self.f_xs.couper(texte, 172), 16, 148, GRIS, carte)
@@ -706,6 +805,13 @@ class Interface:
                  ("livre", "How is your research going?"),
                  ("etirer", "Stand up and stretch a bit"),
                  ("livre", "One page of your thesis today?")]
+        piece = etat.get("piece")
+        clim = etat.get("clim")
+        if piece and not (clim and clim["on"]):
+            if piece[0] >= PIECE_SUGGERE:
+                liste.insert(0, ("thermo", "It's %.0f°: AC on?" % piece[0]))
+            elif piece[1] >= PIECE_HUMIDE:
+                liste.insert(0, ("eau", "Humid air: try Dry mode?"))
         jours = etat.get("meteo") or []
         actuel = etat.get("meteo_now")
         if actuel and actuel["pluie"]:  # il pleut maintenant (météo actuelle, pas celle de la journée)
@@ -726,6 +832,7 @@ class Interface:
     def _scene_calme(self, etat, carte, maintenant):
         fb = self.fb
         self._heure_date(carte)
+        self._coin_clim(etat, carte)
         liste = self._suggestions(etat)
         icone, texte = liste[(self._age(self.base_depuis, maintenant) // SUGGESTION_MS) % len(liste)]
         self.bulle_calme = icone
@@ -746,6 +853,7 @@ class Interface:
     def _scene_nuit(self, etat, carte, mode):
         fb = self.fb
         self._heure_date(carte, y_heure=4)
+        self._coin_clim(etat, carte, y=4)
         titre = "PC locked" if mode == "verrou" else "PC asleep"
         self.f_xs.ecrire(fb, titre, 120, 58, GRIS, carte)
         jours = etat.get("meteo") or []
@@ -801,10 +909,11 @@ class Interface:
         dy = int(round(2 * math.sin(t * souffle)))
         if age_reaction < 500:
             dy -= int(7 * math.sin(math.pi * age_reaction / 500))
+        self._effets_clim(etat, t)
         fb.blit(self.persos[(casque, visage)], PERSO_X, PERSO_Y + dy, CLE)
         if mode == "video":
             fb.blit(self.popcorn, PERSO_X + 8, PERSO_Y + 112 + dy, CLE)
-        if mode == "jeu" and self.chaud:
+        if (mode == "jeu" and self.chaud) or (self.piece_chaude and not dort):
             ph = (t * 0.7) % 1
             fb.blit(self.goutte, PERSO_X + 72, PERSO_Y + 30 + int(ph * 10) + dy, CLE)
         if dort:
