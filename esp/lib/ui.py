@@ -113,6 +113,18 @@ def duree_texte(minutes):
     return "%dh %02d" % (minutes // 60, minutes % 60)
 
 
+def reste_court(secondes):
+    """Compte à rebours court : 3900 -> « 1h 05 », 1380 -> « 23 min », 400 -> « 6:40 »
+    (sous 10 min : minutes:secondes), 45 -> « 45 s »."""
+    if secondes >= 3600:
+        return "%dh %02d" % (secondes // 3600, (secondes % 3600) // 60)
+    if secondes >= 600:
+        return "%d min" % min(59, (secondes + 59) // 60)
+    if secondes >= 60:
+        return "%d:%02d" % (secondes // 60, secondes % 60)
+    return "%d s" % secondes
+
+
 class Interface:
     def __init__(self, ecran):
         self.ecran = ecran
@@ -462,9 +474,9 @@ class Interface:
             return None
         noms = {"cool": "Cool", "dry": "Dry", "fan": "Fan", "auto": "Auto"}
         texte = "AC %s %d°" % (noms.get(c["mode"], "Cool"), c["temp"])
-        reste = c["reste"] - time.ticks_diff(maintenant, c["recu"]) // 60000
+        reste = c["reste"] - time.ticks_diff(maintenant, c["recu"]) // 1000
         if c["reste"] > 0 and reste > 0:
-            texte += " • off in %s" % duree_texte(reste)
+            texte += " • off in %s" % reste_court(reste)
         if c["auto"]:
             texte += " • auto"
         return texte

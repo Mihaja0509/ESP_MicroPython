@@ -128,13 +128,14 @@ object ClimPlan {
     }
 
     // ------------------------------------------------------------------ minuteur
-    /** « Marche pendant [duree] min » (démarrage dans [delai] min, 0 = tout de suite). */
+    /** « Marche pendant [duree] secondes » (démarrage dans [delai] secondes, 0 = tout de suite). */
     fun minuteur(c: Context, duree: Int, delai: Int): Boolean {
+        if (duree < 1) return false
         val maintenant = System.currentTimeMillis()
         annuler(c, CODE_MIN_ON)
         annuler(c, CODE_MIN_OFF)
-        val debut = maintenant + delai * 60_000L
-        val fin = debut + duree * 60_000L
+        val debut = maintenant + delai * 1_000L
+        val fin = debut + duree * 1_000L
         if (delai <= 0) {
             if (!allume(c) && !allumer(c)) return false
             p(c).edit().putLong("minuteur_debut", 0).apply()
@@ -166,6 +167,7 @@ object ClimPlan {
             programmer(c, CODE_FEN_ON, prochaine(de))
             programmer(c, CODE_FEN_OFF, prochaine(a))
         }
+        publier(c) // Phase 14 : l'écran de l'ESP32 sait qu'une plage horaire est active
     }
 
     private fun rearmerFenetre(c: Context, code: Int) {
@@ -238,11 +240,15 @@ object ClimPlan {
         val phase = pr.getString("phase", "idle") ?: "idle"
         var fin = pr.getLong("minuteur_fin", 0)
         if (fin <= maintenant && phase != "idle") fin = pr.getLong("auto_fin", 0)
-        val reste = if (fin > maintenant) ((fin - maintenant) / 60_000L + 1).toInt() else 0
+        // temps restant en SECONDES (Phase 14) : l'agent et l'ESP32 l'affichent en h:mm:ss / min
+        val reste = if (fin > maintenant) ((fin - maintenant + 999L) / 1_000L).toInt() else 0
         val mode = if (phase == "dry" && allume(c)) "dry" else (pr.getString("mode", "cool") ?: "cool")
         val auto = pr.getString("auto", null)?.let { JSONObject(it).optBoolean("actif") } ?: false
+        // plage horaire active : « de-a » en minutes depuis minuit (ex. 1140-1260), sinon 0
+        val f = fen(c)
+        val plage = if (f != null && f.optBoolean("actif")) "${f.optInt("de")}-${f.optInt("a")}" else "0"
         val chemin = "/clim_maj?on=${if (allume(c)) 1 else 0}&mode=$mode&temp=${pr.getInt("temp", 24)}" +
-            "&reste=$reste&auto=${if (auto) 1 else 0}"
+            "&reste=$reste&auto=${if (auto) 1 else 0}&plage=$plage"
         Thread {
             try {
                 VeilleurPC.lire(adresse, token, chemin)

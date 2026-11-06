@@ -349,13 +349,19 @@ def executer(ligne):
             return "ERR utilise : LUM_ESP 5..100"
         return "OK"
     if cmd == "CLIM":
-        # CLIM on mode temp reste auto : envoyé par le PC, venu du téléphone (minutes restantes)
+        # CLIM on mode temp reste auto [plage] : envoyé par le PC, venu du téléphone.
+        # reste = secondes avant l'arrêt du minuteur (0 = pas de minuteur) ; plage = « de-a » en
+        # minutes depuis minuit (plage horaire active) ou 0.
         try:
             p = arg.split()
+            plage = None
+            if len(p) > 5 and "-" in p[5]:
+                de, a = p[5].split("-")
+                plage = (int(de), int(a))
             nouveau = {"on": p[0] == "1", "mode": p[1], "temp": int(p[2]), "reste": int(p[3]),
-                       "auto": p[4] == "1", "recu": time.ticks_ms()}
+                       "auto": p[4] == "1", "plage": plage, "recu": time.ticks_ms()}
         except (ValueError, IndexError):
-            return "ERR utilise : CLIM on mode temp reste auto"
+            return "ERR utilise : CLIM on mode temp reste auto [plage]"
         ancien = etat["clim"]
         etat["clim"] = nouveau
         if ancien is not None and ancien["on"] != nouveau["on"]:

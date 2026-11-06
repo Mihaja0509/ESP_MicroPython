@@ -98,7 +98,7 @@ class MainActivity : FlutterActivity() {
                         resultat.success(true)
                     }
                     "minuteur" -> resultat.success(
-                        ClimPlan.minuteur(c, appel.argument<Int>("duree") ?: 30, appel.argument<Int>("delai") ?: 0)
+                        ClimPlan.minuteur(c, appel.argument<Int>("duree") ?: 1800, appel.argument<Int>("delai") ?: 0)
                     )
                     "annulerMinuteur" -> {
                         ClimPlan.annulerMinuteur(c)

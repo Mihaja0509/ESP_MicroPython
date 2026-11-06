@@ -1933,6 +1933,7 @@ class Agent:
         self.rot_esp = 180 if int(charger_preferences().get("rot_esp", 0)) == 180 else 0
         self.piece = {}          # Phase 13 : dernière mesure du capteur (CLIMAT), voir lire_climat
         self.clim = None         # Phase 13 : état de la clim donné par le téléphone (/clim_maj)
+        self.clim_envoye = 0.0   # Phase 14 : heure du dernier envoi de la ligne CLIM à l'ESP32
         self.lent["ecrans"] = 1
         self.noir = EcranNoir(fin_de_session=self._fin_de_session)
 
@@ -2127,11 +2128,17 @@ class Agent:
             self.liaison.envoyer(f"ROT_ESP {self.rot_esp}")
         c = self.clim
         if c:
-            reste = max(0, int((c["fin"] - time.time()) / 60) + 1) if c["fin"] else 0
-            ligne = "CLIM %d %s %d %d %d" % (c["on"], c["mode"], c["temp"], reste, c["auto"])
-            if self.precedent.get("CLIM") != ligne:
-                self.precedent["CLIM"] = ligne
-                self.liaison.envoyer(ligne)
+            # Phase 14 : reste en SECONDES. La ligne ne part que si l'état change (ou toutes les
+            # 20 s pour recaler le compte à rebours de l'ESP32, qui compte seul entre-temps).
+            reste = max(0, int(c["fin"] - time.time() + 0.999)) if c["fin"] else 0
+            cle = "%d %s %d %d %d %s" % (c["on"], c["mode"], c["temp"], 1 if reste > 0 else 0,
+                                         c["auto"], c["plage"])
+            maintenant = time.time()
+            if self.precedent.get("CLIM") != cle or maintenant - self.clim_envoye >= 20:
+                self.precedent["CLIM"] = cle
+                self.clim_envoye = maintenant
+                self.liaison.envoyer("CLIM %d %s %d %d %d %s" % (c["on"], c["mode"], c["temp"], reste,
+                                                                c["auto"], c["plage"]))
         reste = self.arret_reste()
         if self.precedent.get("ARRET") != (reste > 0):
             self.precedent["ARRET"] = reste > 0
@@ -2444,18 +2451,22 @@ class Agent:
         return {"ok": True, "t": p["t"], "h": p["h"], "p": p["p"], "age": round(time.time() - p["vu"])}
 
     def clim_maj(self, d):
-        """État de la clim poussé par le téléphone : on, mode, temp, reste (min), auto."""
+        """État de la clim poussé par le téléphone : on, mode, temp, reste (SECONDES), auto, plage."""
         try:
             mode = str(d.get("mode", "cool"))
             if mode not in ("cool", "dry", "fan", "auto"):
                 mode = "cool"
-            reste = max(0, min(999, int(float(d.get("reste", 0)))))
+            reste = max(0, min(90000, int(float(d.get("reste", 0)))))
+            plage = str(d.get("plage", "0"))
+            if not re.fullmatch(r"\d{1,4}-\d{1,4}", plage):
+                plage = "0"  # pas de plage horaire active
             self.clim = {
                 "on": 1 if str(d.get("on", "0")) == "1" else 0,
                 "mode": mode,
                 "temp": max(16, min(30, int(float(d.get("temp", 24))))),
-                "fin": time.time() + reste * 60 if reste > 0 else 0,
+                "fin": time.time() + reste if reste > 0 else 0,
                 "auto": 1 if str(d.get("auto", "0")) == "1" else 0,
+                "plage": plage,
             }
         except (TypeError, ValueError):
             return

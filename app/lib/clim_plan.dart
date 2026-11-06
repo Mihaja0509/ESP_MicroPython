@@ -84,6 +84,43 @@ class ClimPlan {
 String _hhmm(int minutes) =>
     '${(minutes ~/ 60).toString().padLeft(2, '0')}:${(minutes % 60).toString().padLeft(2, '0')}';
 
+// ---------------------------------------------------------------- durées du minuteur (Phase 14)
+/// Durée maximale du minuteur : 24 h.
+const int minuteurMax = 24 * 3600;
+
+/// Heures + minutes + secondes -> secondes.
+int dureeEnSecondes(int h, int m, int s) => h * 3600 + m * 60 + s;
+
+/// Secondes -> (heures, minutes, secondes).
+({int h, int m, int s}) secondesEnHms(int total) {
+  final t = total < 0 ? 0 : total;
+  return (h: t ~/ 3600, m: (t % 3600) ~/ 60, s: t % 60);
+}
+
+/// Texte du compte à rebours : « 1:05:09 » (h:mm:ss).
+String formaterReste(int secondes) {
+  final d = secondesEnHms(secondes);
+  return '${d.h}:${d.m.toString().padLeft(2, '0')}:${d.s.toString().padLeft(2, '0')}';
+}
+
+/// Remet les trois champs dans leurs limites (heures 0-24, minutes et secondes 0-59) et la durée
+/// totale dans 0..24:00:00. Les champs vides ou illisibles valent 0.
+({int h, int m, int s}) limiterHms(String h, String m, String s) {
+  final hh = (int.tryParse(h) ?? 0).clamp(0, 24).toInt();
+  final mm = (int.tryParse(m) ?? 0).clamp(0, 59).toInt();
+  final ss = (int.tryParse(s) ?? 0).clamp(0, 59).toInt();
+  final total = dureeEnSecondes(hh, mm, ss);
+  if (total > minuteurMax) return (h: 24, m: 0, s: 0);
+  return (h: hh, m: mm, s: ss);
+}
+
+/// null si la durée est valable, sinon le message à afficher.
+String? verifierDuree(int total) {
+  if (total < 1) return 'Minimum 1 second';
+  if (total > minuteurMax) return 'Maximum 24:00:00';
+  return null;
+}
+
 class _Sous extends StatelessWidget {
   final String texte;
 
@@ -116,9 +153,13 @@ class CarteClimPlan extends StatefulWidget {
 
 class _CarteClimPlanState extends State<CarteClimPlan> {
   Timer? _minuterie;
+  int _tic = 0;
   Map<String, dynamic> _rt =
       {}; // état côté Android : on, minuteurFin, phase, exact…
-  int _duree = 30;
+  int _duree = 30 * 60; // durée du minuteur en SECONDES (champs h / min / s)
+  final _champH = TextEditingController();
+  final _champM = TextEditingController();
+  final _champS = TextEditingController();
   bool _fenActif = false;
   int _fenDe = 19 * 60;
   int _fenA = 21 * 60;
@@ -134,16 +175,36 @@ class _CarteClimPlanState extends State<CarteClimPlan> {
   void initState() {
     super.initState();
     _charger();
-    _minuterie = Timer.periodic(
-      const Duration(seconds: 5),
-      (_) => _rafraichir(),
-    );
+    // chaque seconde : le compte à rebours se met à jour ; toutes les 5 s : état lu chez Android
+    _minuterie = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      _tic++;
+      final fin = (_rt['minuteurFin'] as num?)?.toInt() ?? 0;
+      final fini = fin > 0 && fin <= DateTime.now().millisecondsSinceEpoch;
+      if (_tic % 5 == 0 || fini) {
+        _rafraichir();
+      } else if (fin > 0) {
+        setState(() {});
+      }
+    });
   }
 
   @override
   void dispose() {
     _minuterie?.cancel();
+    _champH.dispose();
+    _champM.dispose();
+    _champS.dispose();
     super.dispose();
+  }
+
+  /// Écrit une durée (secondes) dans les trois champs.
+  void _remplirChamps(int secondes) {
+    final d = secondesEnHms(secondes);
+    _champH.text = d.h.toString();
+    _champM.text = d.m.toString();
+    _champS.text = d.s.toString();
+    _duree = secondes;
   }
 
   Future<void> _charger() async {
@@ -151,7 +212,10 @@ class _CarteClimPlanState extends State<CarteClimPlan> {
     final rt = await ClimPlan.etat();
     if (!mounted) return;
     setState(() {
-      _duree = p.getInt('plan_duree') ?? 30;
+      // dernière durée utilisée (secondes) ; l'ancienne valeur en minutes est reprise une fois
+      final secondes =
+          p.getInt('plan_duree_s') ?? (p.getInt('plan_duree') ?? 30) * 60;
+      _remplirChamps(secondes.clamp(1, minuteurMax).toInt());
       _fenActif = p.getBool('fen_actif') ?? false;
       _fenDe = p.getInt('fen_de') ?? 19 * 60;
       _fenA = p.getInt('fen_a') ?? 21 * 60;
@@ -173,13 +237,36 @@ class _CarteClimPlanState extends State<CarteClimPlan> {
   }
 
   // ------------------------------------------------------------ minuteur
-  Future<void> _choisirDuree(int m) async {
-    setState(() => _duree = m);
+  /// Raccourci (15 min, 30 min, 1 h, 2 h) : remplit les trois champs.
+  Future<void> _choisirDuree(int secondes) async {
+    setState(() => _remplirChamps(secondes));
     final p = await SharedPreferences.getInstance();
-    await p.setInt('plan_duree', m);
+    await p.setInt('plan_duree_s', secondes);
+  }
+
+  /// Saisie dans un des champs : on remet les valeurs dans leurs limites et on les garde.
+  Future<void> _champModifie() async {
+    final d = limiterHms(_champH.text, _champM.text, _champS.text);
+    setState(() => _duree = dureeEnSecondes(d.h, d.m, d.s));
+    final p = await SharedPreferences.getInstance();
+    if (_duree >= 1) await p.setInt('plan_duree_s', _duree);
+  }
+
+  /// À la fin de la saisie : les champs affichent les valeurs corrigées.
+  void _champTermine() {
+    final d = limiterHms(_champH.text, _champM.text, _champS.text);
+    setState(() {
+      _champH.text = d.h.toString();
+      _champM.text = d.m.toString();
+      _champS.text = d.s.toString();
+      _duree = dureeEnSecondes(d.h, d.m, d.s);
+    });
   }
 
   Future<void> _lancerMinuteur() async {
+    _champTermine();
+    final erreur = verifierDuree(_duree);
+    if (erreur != null) return;
     HapticFeedback.selectionClick();
     final ok = await ClimPlan.minuteur(_duree, 0);
     await _rafraichir();
@@ -188,9 +275,39 @@ class _CarteClimPlanState extends State<CarteClimPlan> {
       SnackBar(
         content: Text(
           ok
-              ? 'Timer set: the AC is on for $_duree min'
+              ? 'Timer set: the AC is on for ${formaterReste(_duree)}'
               : 'Could not send: no IR blaster, or open the AC card once first',
         ),
+      ),
+    );
+  }
+
+  Widget _champDuree(String etiquette, TextEditingController c, int maxi) {
+    return Expanded(
+      child: TextField(
+        controller: c,
+        keyboardType: TextInputType.number,
+        textInputAction: TextInputAction.done,
+        textAlign: TextAlign.center,
+        maxLength: 2,
+        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+        style: const TextStyle(
+          fontSize: 22,
+          fontWeight: FontWeight.w800,
+          color: Colors.white,
+        ),
+        decoration: InputDecoration(
+          labelText: etiquette,
+          counterText: '',
+          isDense: true,
+          border: const OutlineInputBorder(),
+        ),
+        onChanged: (_) => _champModifie(),
+        onEditingComplete: () {
+          _champTermine();
+          FocusScope.of(context).unfocus();
+        },
+        onTapOutside: (_) => _champTermine(),
       ),
     );
   }
@@ -308,9 +425,10 @@ class _CarteClimPlanState extends State<CarteClimPlan> {
     final e = widget.etat;
     final allume = _rt['on'] == true;
     final fin = (_rt['minuteurFin'] as num?)?.toInt() ?? 0;
-    final resteMin = fin > 0
-        ? ((fin - DateTime.now().millisecondsSinceEpoch) / 60000).ceil()
+    final resteSec = fin > 0
+        ? ((fin - DateTime.now().millisecondsSinceEpoch) / 1000).ceil()
         : 0;
+    final erreurDuree = verifierDuree(_duree);
     final phase = (_rt['phase'] ?? 'idle').toString();
     final t = e.pieceT;
     final piece = t == null
@@ -339,14 +457,37 @@ class _CarteClimPlanState extends State<CarteClimPlan> {
             },
           ),
           const _Sous('Timer'),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _champDuree('Hours', _champH, 24),
+              const SizedBox(width: 8),
+              _champDuree('Minutes', _champM, 59),
+              const SizedBox(width: 8),
+              _champDuree('Seconds', _champS, 59),
+            ],
+          ),
+          if (erreurDuree != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                erreurDuree,
+                style: const TextStyle(color: Couleurs.orange, fontSize: 12),
+              ),
+            ),
+          const SizedBox(height: 4),
           Wrap(
             spacing: 6,
             children: [
-              for (final m in const [15, 30, 45, 60, 90, 120])
-                ChoiceChip(
-                  label: Text('$m min'),
-                  selected: _duree == m,
-                  onSelected: (_) => _choisirDuree(m),
+              for (final raccourci in const [
+                (15 * 60, '15 min'),
+                (30 * 60, '30 min'),
+                (3600, '1 h'),
+                (2 * 3600, '2 h'),
+              ])
+                ActionChip(
+                  label: Text(raccourci.$2),
+                  onPressed: () => _choisirDuree(raccourci.$1),
                 ),
             ],
           ),
@@ -355,12 +496,12 @@ class _CarteClimPlanState extends State<CarteClimPlan> {
             children: [
               Expanded(
                 child: FilledButton.icon(
-                  onPressed: _lancerMinuteur,
+                  onPressed: erreurDuree == null ? _lancerMinuteur : null,
                   icon: const Icon(Icons.play_arrow_rounded),
-                  label: Text('Run for $_duree min'),
+                  label: Text('Run for ${formaterReste(_duree)}'),
                 ),
               ),
-              if (resteMin > 0) ...[
+              if (resteSec > 0) ...[
                 const SizedBox(width: 8),
                 OutlinedButton(
                   onPressed: _annulerMinuteur,
@@ -369,12 +510,17 @@ class _CarteClimPlanState extends State<CarteClimPlan> {
               ],
             ],
           ),
-          if (resteMin > 0)
+          if (resteSec > 0)
             Padding(
               padding: const EdgeInsets.only(top: 6),
               child: Text(
-                'The AC turns off in $resteMin min',
-                style: const TextStyle(color: Couleurs.orange, fontSize: 12),
+                'The AC turns off in ${formaterReste(resteSec)}',
+                style: const TextStyle(
+                  color: Couleurs.orange,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
               ),
             ),
           const _Sous('Daily window'),
