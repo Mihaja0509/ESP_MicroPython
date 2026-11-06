@@ -56,13 +56,14 @@ Agent PC (`tools\agent\agent_pc.py`) : il occupe le port COM4 tant qu'il tourne.
 - Pour libérer COM4 avant mpremote ou `tools\pc_test.py` : créer le fichier `tools\agent\PAUSE` (l'agent ferme le port en ~1 s), puis le **supprimer** à la fin pour que l'agent se reconnecte.
 - Version console (`py -X utf8 tools\agent\agent_pc.py`) : la quitter avec `q`.
 - La 1re commande mpremote après un autre programme sur COM4 échoue souvent avec `ClearCommError` : la relancer une fois.
-- Météo : l'agent la télécharge (Open-Meteo, toutes les 30 min, fil à part) et l'envoie à l'ESP32 (`METEO_J`). Position dans `tools\agent\reglages.json` (créé au 1er lancement, rempli par Mihaja : `ville` ou `latitude`/`longitude`) : jamais lu, jamais commité.
+- Météo : l'agent la télécharge (Open-Meteo, toutes les 15 min, fil à part) et l'envoie à l'ESP32 (`METEO_J` et, pour la pluie du moment, `METEO_NOW icone 0|1`). Position dans `tools\agent\reglages.json` (créé au 1er lancement, rempli par Mihaja : `ville` ou `latitude`/`longitude`) : jamais lu, jamais commité.
 
 ## Fichiers de la carte (Phase 4)
 
 - `esp/main.py` → `:main.py` : boucle messages + dessin ~12 images/s ; erreurs ajoutées dans `:erreur.txt`.
 - `esp/lib/` → `:lib/` : `lcd.py`, `hid_pc.py`, `ui.py` (scènes, mascotte, bandeaux, particules), `polices.py` (polices lissées Inter), `meteo.py` (Wi-Fi + Open-Meteo + heure, facultatif).
-- `esp/assets/` → `:assets` (38 fichiers `.bin` / `.fnt` : fonds, mascotte, icônes, météo, polices) : `fs cp -r esp/assets :`.
+- `esp/assets/` → `:assets` (59 fichiers `.bin` / `.fnt` : fonds, mascotte, icônes, météo, polices) : `fs cp -r esp/assets/. :assets/`.
+- `esp/lib/capteur.py` → `:lib/capteur.py` (Phase 13, capteur de la pièce). Attention : `fs cp a.py b.py :` copie à la **racine** de la carte (et `import` y trouverait ce fichier en premier) ; copier fichier par fichier vers `:lib/…`.
 - `esp/secrets.py` → `:secrets.py` (facultatif, Wi-Fi 2,4 GHz + position, modèle `esp/secrets.example.py`).
 - Régénérer les images et polices : `py -m pip install --user pillow numpy scipy`, mettre les `Inter-*.otf` dans `tools/assets/sources/`, puis `py tools\assets\generer_assets.py` (aperçus dans `tools/assets/apercus/`).
 
@@ -93,6 +94,22 @@ Dans `app/` :
 - `flutter analyze`
 - `flutter test`
 - `flutter build apk --release` (ou `--debug`) ; `flutter install` avec le téléphone branché (débogage USB)
+
+## Phases 12 et 13 : clim York depuis le téléphone, capteur, écran
+
+Carte **en MicroPython v1.29.0** (reflashée le 2026-11-06, variante `ESP32_GENERIC_S3-SPIRAM_OCT`). Port série MicroPython : **COM4**. COM3 = mode BOOT / firmware C++ (ne plus s'en servir). Flash : `py -m esptool --chip esp32s3 --port COM3 erase-flash`, puis `write-flash -z 0x0 bin\<binaire>` (carte en mode BOOT). Après un flash : `mip install usb-device-hid`, copier `esp/main.py`, `esp/lib/*.py`, `esp/assets`.
+
+```
+Téléphone (IR + alarmes Android) ── HTTP :8765 ──> agent PC ──USB série──> ESP32 (écran, capteur)
+```
+
+- **Clim par IR du téléphone** : `lib/clim_ir.dart` (trame York 8 octets, bit 0 de l'octet 7 = swing actif), `lib/ecrans/clim.dart` (carte « Air conditioner »), canal Android `dadou/ir` (`MainActivity.kt`, `ConsumerIrManager`). La touche power est une **bascule** : l'état « allumée ? » est supposé.
+- **Minuteur, plage horaire, automatisme** : `lib/clim_plan.dart` (carte « AC timer & automation ») + `ClimPlan.kt` (objet + `ClimReceiver`, alarmes exactes, réarmées au redémarrage) via le canal `dadou/clim` (`trames`, `setOn`, `minuteur`, `annulerMinuteur`, `fenetre`, `auto`, `publier`, `etat`). Tout tourne côté Android, app fermée. Permissions : `TRANSMIT_IR`, `USE_EXACT_ALARM`, `SCHEDULE_EXACT_ALARM` (≤ 32), `RECEIVE_BOOT_COMPLETED`.
+- **Liaison clim → PC → ESP32** : le téléphone appelle `GET /clim_maj?on=&mode=&temp=&reste=&auto=` (agent : `clim_maj`) ; l'agent envoie `CLIM on mode temp reste auto` à l'ESP32 (affichage, bulle « thermo »). L'automatisme lit `GET /clim_mesure` (agent : `piece_pour_app`, mesure de moins de 30 s sinon `ok:false`). Les deux routes demandent l'en-tête `X-Token`.
+- **Capteur AHT20 + BMP280 (I2C)** : `esp/lib/capteur.py` (mesure toutes les 5 s, `DECALAGE_T`), ligne série ESP32 → PC `CLIMAT t10 humidité pression` (t10 = 10 × °C, pas écrite dans agent.log), valeurs `piece_t/h/p` dans l'état de l'app. **SDA et SCL = None tant que le capteur n'est pas câblé** ; trouver les pins avec `tools/i2c_scan.py` (agent en PAUSE) puis les écrire dans `capteur.py`. 3,3 V uniquement.
+- **Écran retourné** : `ROT_ESP 0|180` (agent → ESP32, gardé dans `preferences.json` côté PC et `rotation.txt` sur la carte ; choix dans l'app, carte Brightness). Mode jeu : heure en haut à droite, « Session: … » dans la ligne du bas.
+- **Écran / mascotte** : coin haut droit « AC 24° » et « 24.1° 58 % », ligne du bas qui alterne PC / clim / pièce, flocons (Cool), gouttes (Dry), traits d'air (Fan, Auto), sueur si la pièce ≥ 29 °C et clim éteinte, idées « It's 29°: AC on? » et « Humid air: try Dry mode? ».
+- **Souris** : tolérance de tap de 8 px, curseur de sensibilité hors de la zone tactile, réponses de l'agent calculées dans un fil (`_appel`), `sys.setswitchinterval(0.002)`, ligne `[agent] souris : …` toutes les 10 s dans agent.log (messages, écart max, boucle max, SendInput max).
 
 ## Règles
 
