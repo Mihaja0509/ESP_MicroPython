@@ -17,6 +17,7 @@ import machine
 
 import lcd
 from hid_pc import MEDIA, PC
+from capteur import Capteur
 from meteo import Meteo
 from ui import Interface
 
@@ -85,6 +86,7 @@ def noter_erreur(e):
 # Premier dessin tout de suite (écran noir tant que le PC ne parle pas), puis clavier/souris
 ui.dessiner(etat, time.ticks_ms())
 meteo = Meteo(reglages)  # lance la connexion Wi-Fi (sans attendre)
+capteur = Capteur()      # Phase 13 : AHT20 + BMP280 (silencieux si pas branché)
 try:
     usb_ok = pc.demarrer()
 except Exception as e:  # le PC n'était peut-être pas prêt (démarrage de Windows)
@@ -425,6 +427,13 @@ while True:
                 break
             print(executer(ligne.strip()))
         maintenant = time.ticks_ms()
+        if capteur.pas(maintenant):
+            etat["piece"] = capteur.mesure()
+            if etat["piece"]:
+                t, h, p = etat["piece"]
+                print("CLIMAT %d %d %d" % (round(t * 10), round(h), round(p)))
+        elif capteur.ok and capteur.mesure() is None:
+            etat["piece"] = None  # le capteur ne répond plus : l'écran n'affiche plus la pièce
         if etat["connecte"] and time.ticks_diff(maintenant, derniere_donnee) > ATTENTE_ABSENT:
             etat["connecte"] = False
         # écran noir : le PC s'est éteint après un arrêt annoncé, ou la carte vient de démarrer
