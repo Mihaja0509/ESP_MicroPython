@@ -130,6 +130,8 @@ class MainActivity : FlutterActivity() {
                     else -> resultat.notImplemented()
                 }
             }
+        // Phase 15 : à chaque ouverture, on réarme la clim (Xiaomi peut avoir supprimé les alarmes)
+        ClimPlan.rearmer(applicationContext)
         // après une mise à jour de l'app, la vérification reprend toute seule
         val prefs = getSharedPreferences(VeilleurPC.PREFS, Context.MODE_PRIVATE)
         if (prefs.getBoolean("flutter.notif_actif", false)) {

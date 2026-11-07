@@ -11,11 +11,14 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.hardware.ConsumerIrManager
 import android.os.Build
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import org.json.JSONObject
-import java.util.Calendar
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.math.max
 import kotlin.math.min
 
@@ -46,7 +49,21 @@ object ClimPlan {
     private const val PAUSE_COMPRESSEUR_MS = 3 * 60_000L // le compresseur ne redémarre pas avant 3 min
     private const val MANUEL_MS = 30 * 60_000L           // après une action à la main, l'auto se tait
 
+    private const val TAG = "ClimPlan"
+
     private fun p(c: Context) = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+    private fun heure(ms: Long, format: String = "HH:mm"): String =
+        SimpleDateFormat(format, Locale.US).format(Date(ms))
+
+    /** Trace chaque décision : logcat (tag ClimPlan) + 12 dernières lignes pour l'app (sans adb). */
+    @Synchronized
+    fun journal(c: Context, texte: String) {
+        Log.i(TAG, texte)
+        val lignes = (p(c).getString("journal", "") ?: "").split("\n").filter { it.isNotEmpty() }
+        val nouvelles = (lignes + "${heure(System.currentTimeMillis(), "dd/MM HH:mm:ss")} $texte").takeLast(12)
+        p(c).edit().putString("journal", nouvelles.joinToString("\n")).apply()
+    }
 
     // ------------------------------------------------------------------ trames et état
     fun trames(c: Context, frequence: Int, power: List<Int>, dryPower: List<Int>, mode: String, temp: Int) {
@@ -84,22 +101,43 @@ object ClimPlan {
     }
 
     private fun emettre(c: Context, cle: String): Boolean {
-        val ir = c.getSystemService(Context.CONSUMER_IR_SERVICE) as? ConsumerIrManager ?: return false
-        if (!ir.hasIrEmitter()) return false
-        val m = motif(c, cle) ?: return false
-        ir.transmit(p(c).getInt("freq", 38000), m) // une seule fois : la touche power est une bascule
-        return true
+        val ir = c.getSystemService(Context.CONSUMER_IR_SERVICE) as? ConsumerIrManager
+        if (ir == null || !ir.hasIrEmitter()) {
+            journal(c, "IR not sent: no IR blaster")
+            return false
+        }
+        val m = motif(c, cle)
+        if (m == null) {
+            journal(c, "IR not sent: no frame stored (open the AC card once)")
+            return false
+        }
+        return try {
+            ir.transmit(p(c).getInt("freq", 38000), m) // une seule fois : la touche power est une bascule
+            journal(c, "IR sent ($cle)")
+            true
+        } catch (e: Exception) {
+            journal(c, "IR error: $e")
+            false
+        }
     }
 
+    @Synchronized
     fun allumer(c: Context, cle: String = "m_power"): Boolean {
-        if (allume(c)) return false
+        if (allume(c)) {
+            journal(c, "ON skipped: AC already assumed on (no IR, power is a toggle)")
+            return false
+        }
         if (!emettre(c, cle)) return false
         p(c).edit().putBoolean("on", true).apply()
         return true
     }
 
+    @Synchronized
     fun eteindre(c: Context): Boolean {
-        if (!allume(c)) return false
+        if (!allume(c)) {
+            journal(c, "OFF skipped: AC already assumed off (no IR, power is a toggle)")
+            return false
+        }
         if (!emettre(c, "m_power")) return false
         marquerEteinte(c)
         return true
@@ -126,6 +164,30 @@ object ClimPlan {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+    /** Ce qu'Android affiche pour l'alarme (icône réveil) : ouvre l'app. */
+    private fun ouvrirApp(c: Context): PendingIntent = PendingIntent.getActivity(
+        c, 300,
+        Intent(c, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
+
+    /**
+     * Heure fixe (plage ON/OFF, minuteur) : setAlarmClock, le plus fiable sur Xiaomi/HyperOS. C'est un
+     * réveil pour le système : ni Doze ni l'économie de batterie ne le retardent.
+     */
+    fun armerHeureFixe(c: Context, code: Int, quand: Long) {
+        val am = c.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        try {
+            am.setAlarmClock(AlarmManager.AlarmClockInfo(quand, ouvrirApp(c)), intention(c, code))
+            journal(c, "Armed $code for ${heure(quand, "dd/MM HH:mm:ss")}")
+        } catch (e: SecurityException) {
+            // alarmes exactes refusées : mieux vaut une alarme un peu en retard que pas d'alarme
+            am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, quand, intention(c, code))
+            journal(c, "Exact alarms refused: $code armed inexact for ${heure(quand, "dd/MM HH:mm:ss")}")
+        }
+    }
+
+    /** Alarme de fond (republication) : pas besoin de réveil à l'heure pile. */
     fun programmer(c: Context, code: Int, quand: Long) {
         val am = c.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         if (Build.VERSION.SDK_INT >= 31 && !am.canScheduleExactAlarms()) {
@@ -137,17 +199,6 @@ object ClimPlan {
 
     fun annuler(c: Context, code: Int) {
         (c.getSystemService(Context.ALARM_SERVICE) as AlarmManager).cancel(intention(c, code))
-    }
-
-    /** Prochaine occurrence (ms) d'une heure du jour exprimée en minutes depuis minuit. */
-    private fun prochaine(minutes: Int): Long {
-        val cal = Calendar.getInstance()
-        cal.set(Calendar.HOUR_OF_DAY, minutes / 60)
-        cal.set(Calendar.MINUTE, minutes % 60)
-        cal.set(Calendar.SECOND, 0)
-        cal.set(Calendar.MILLISECOND, 0)
-        if (cal.timeInMillis <= System.currentTimeMillis() + 1000) cal.add(Calendar.DAY_OF_YEAR, 1)
-        return cal.timeInMillis
     }
 
     // ------------------------------------------------------------------ minuteur
@@ -167,11 +218,11 @@ object ClimPlan {
             if (!allume(c) && !allumer(c)) return false
             p(c).edit().putLong("minuteur_debut", 0).apply()
         } else {
-            programmer(c, CODE_MIN_ON, debut)
+            armerHeureFixe(c, CODE_MIN_ON, debut)
             p(c).edit().putLong("minuteur_debut", debut).apply()
         }
         p(c).edit().putLong("minuteur_fin", fin).apply()
-        programmer(c, CODE_MIN_OFF, fin)
+        armerHeureFixe(c, CODE_MIN_OFF, fin)
         publier(c)
         return true
     }
@@ -190,21 +241,29 @@ object ClimPlan {
         p(c).edit().putString("fen", JSONObject().put("actif", actif).put("de", de).put("a", a).toString()).apply()
         annuler(c, CODE_FEN_ON)
         annuler(c, CODE_FEN_OFF)
-        if (actif) {
-            programmer(c, CODE_FEN_ON, prochaine(de))
-            programmer(c, CODE_FEN_OFF, prochaine(a))
-        }
+        journal(c, "Window ${if (actif) "enabled" else "disabled"}: on $de off $a (minutes)")
+        armerFenetre(c)
         publier(c) // Phase 14 : l'écran de l'ESP32 sait qu'une plage horaire est active
+    }
+
+    /** Arme les deux alarmes de la plage à leur prochaine occurrence (modification, boot, ouverture de l'app). */
+    fun armerFenetre(c: Context) {
+        rearmerFenetre(c, CODE_FEN_ON)
+        rearmerFenetre(c, CODE_FEN_OFF)
     }
 
     private fun rearmerFenetre(c: Context, code: Int) {
         val f = fen(c) ?: return
         if (!f.optBoolean("actif")) return
-        programmer(c, code, prochaine(f.optInt(if (code == CODE_FEN_ON) "de" else "a")))
+        val minutes = f.optInt(if (code == CODE_FEN_ON) "de" else "a")
+        armerHeureFixe(c, code, Horaire.prochaine(System.currentTimeMillis(), minutes))
     }
 
     // ------------------------------------------------------------------ réception des alarmes
     fun executer(c: Context, code: Int) {
+        if (code != CODE_REPUB) journal(c, "Alarm $code fired (assumed ${if (allume(c)) "on" else "off"})")
+        // la prochaine occurrence d'abord : quoi qu'il arrive à l'IR, la plage de demain reste armée
+        if (code == CODE_FEN_ON || code == CODE_FEN_OFF) rearmerFenetre(c, code)
         when (code) {
             CODE_MIN_OFF -> {
                 p(c).edit().putLong("minuteur_fin", 0).apply()
@@ -218,14 +277,8 @@ object ClimPlan {
             }
             CODE_REPUB -> Unit // rien à faire : la republication a lieu juste après
             CODE_MIN_ON -> if (allumer(c)) notifier(c, "Timer: AC turned on")
-            CODE_FEN_ON -> {
-                if (allumer(c)) notifier(c, "Schedule: AC turned on")
-                rearmerFenetre(c, code)
-            }
-            CODE_FEN_OFF -> {
-                if (eteindre(c)) notifier(c, "Schedule: AC turned off")
-                rearmerFenetre(c, code)
-            }
+            CODE_FEN_ON -> if (allumer(c)) notifier(c, "Schedule: AC turned on")
+            CODE_FEN_OFF -> if (eteindre(c)) notifier(c, "Schedule: AC turned off")
             CODE_AUTO -> auto(c)
         }
         publier(c, attendre = true) // dans le fil du récepteur : l'envoi finit avant la fin de l'alarme
@@ -236,15 +289,10 @@ object ClimPlan {
         val pr = p(c)
         val maintenant = System.currentTimeMillis()
         val debut = pr.getLong("minuteur_debut", 0)
-        if (debut > maintenant) programmer(c, CODE_MIN_ON, debut)
+        if (debut > maintenant) armerHeureFixe(c, CODE_MIN_ON, debut)
         val fin = pr.getLong("minuteur_fin", 0)
-        if (fin > 0) programmer(c, CODE_MIN_OFF, max(fin, maintenant + 5_000))
-        fen(c)?.let {
-            if (it.optBoolean("actif")) {
-                programmer(c, CODE_FEN_ON, prochaine(it.optInt("de")))
-                programmer(c, CODE_FEN_OFF, prochaine(it.optInt("a")))
-            }
-        }
+        if (fin > 0) armerHeureFixe(c, CODE_MIN_OFF, max(fin, maintenant + 5_000))
+        armerFenetre(c)
         pr.getString("auto", null)?.let {
             if (JSONObject(it).optBoolean("actif")) programmer(c, CODE_AUTO, maintenant + 30_000)
         }
@@ -385,16 +433,11 @@ object ClimPlan {
             val canal = NotificationChannel(CANAL, "Air conditioner", NotificationManager.IMPORTANCE_LOW)
             c.getSystemService(NotificationManager::class.java).createNotificationChannel(canal)
         }
-        val ouvrir = PendingIntent.getActivity(
-            c, 300,
-            Intent(c, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
         val n = NotificationCompat.Builder(c, CANAL)
             .setSmallIcon(R.drawable.w_power)
             .setContentTitle("Air conditioner")
             .setContentText(texte)
-            .setContentIntent(ouvrir)
+            .setContentIntent(ouvrirApp(c))
             .setAutoCancel(true)
             .build()
         try {
@@ -409,9 +452,14 @@ object ClimPlan {
 class ClimReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val appli = context.applicationContext
-        if (intent.action == Intent.ACTION_BOOT_COMPLETED || intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) {
-            ClimPlan.rearmer(appli)
-            return
+        when (intent.action) {
+            Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED,
+            "android.intent.action.QUICKBOOT_POWERON",
+            Intent.ACTION_TIMEZONE_CHANGED, Intent.ACTION_TIME_CHANGED -> {
+                ClimPlan.journal(appli, "Re-arm after ${intent.action}")
+                ClimPlan.rearmer(appli)
+                return
+            }
         }
         val code = intent.getIntExtra("code", 0)
         val attente = goAsync()
@@ -420,6 +468,7 @@ class ClimReceiver : BroadcastReceiver() {
                 ClimPlan.executer(appli, code)
             } catch (e: Exception) {
                 // une alarme ratée ne doit jamais faire planter l'app
+                ClimPlan.journal(appli, "Alarm $code error: $e")
             } finally {
                 attente.finish()
             }
