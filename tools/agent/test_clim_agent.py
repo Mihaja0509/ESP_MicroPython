@@ -31,6 +31,52 @@ def nouvel_agent():
     return ag
 
 
+class TestClimatAgent(unittest.TestCase):
+    """Phase 15 : CLIMAT ERR marque la mesure absente, /clim_mesure le dit, l'automatisme ne fait rien."""
+
+    def setUp(self):
+        Horloge.t = 1_000_000.0
+        p = mock.patch.object(a.time, "time", lambda: Horloge.t)
+        p.start()
+        self.addCleanup(p.stop)
+        self.ag = nouvel_agent()
+        self.ag.piece = {}
+        self.ag.piece_vue = None
+        self.ag.piece_erreur = None
+
+    def test_mesure_valide(self):
+        self.ag.lire_climat("CLIMAT 274 61 1008")
+        m = self.ag.piece_pour_app()
+        self.assertTrue(m["ok"])
+        self.assertEqual((m["t"], m["h"], m["p"]), (27.4, 61, 1008))
+
+    def test_climat_err_marque_absent(self):
+        self.ag.lire_climat("CLIMAT 274 61 1008")
+        self.ag.lire_climat("CLIMAT ERR absent")
+        self.assertEqual(self.ag.piece_pour_app(), {"ok": False, "absent": True, "raison": "absent"})
+
+    def test_retour_apres_erreur(self):
+        self.ag.lire_climat("CLIMAT ERR i2c")
+        self.ag.lire_climat("CLIMAT 250 50 1000")
+        self.assertTrue(self.ag.piece_pour_app()["ok"])
+
+    def test_mesure_trop_vieille_absente(self):
+        self.ag.lire_climat("CLIMAT 274 61 1008")
+        Horloge.t += 31
+        m = self.ag.piece_pour_app()
+        self.assertFalse(m["ok"])
+        self.assertTrue(m["absent"])
+
+    def test_humidite_inconnue_bmp_seul(self):
+        self.ag.lire_climat("CLIMAT 250 -1 1000")
+        self.assertEqual(self.ag.piece_pour_app()["h"], -1)
+
+    def test_ligne_illisible_ignoree(self):
+        self.ag.lire_climat("CLIMAT 274 61 1008")
+        self.ag.lire_climat("CLIMAT abc")
+        self.assertTrue(self.ag.piece_pour_app()["ok"])
+
+
 class TestClimAgent(unittest.TestCase):
     def setUp(self):
         Horloge.t = 1_000_000.0

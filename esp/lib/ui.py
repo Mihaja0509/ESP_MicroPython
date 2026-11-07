@@ -519,6 +519,8 @@ class Interface:
         piece = etat.get("piece")
         if not piece:
             return None
+        if piece[1] < 0:  # pas d'humidité : BMP280 seul (Phase 15)
+            return "Room %.1f°" % piece[0]
         return "Room %.1f° • %d %%" % (piece[0], piece[1])
 
     def _coin_clim(self, etat, carte, y=8, discret=False, maintenant=0):
@@ -533,7 +535,7 @@ class Interface:
         gauche = 16 + self.f_heure.largeur(heure) + 6   # collé à l'heure
         droite = CARTE_DROITE - 12                      # marge de 12 px au bord droit de la carte
         temp = ("%.1f°" % piece[0]) if piece else "--°"
-        hum = ("%d %%" % piece[1]) if piece else None
+        hum = ("%d %%" % piece[1]) if piece and piece[1] >= 0 else None
         polices = (self.f_s, self.f_xs) if discret else (self.f_m, self.f_s, self.f_xs)
         police = polices[-1]
         for p in polices:

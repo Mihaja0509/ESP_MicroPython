@@ -447,8 +447,12 @@ while True:
             if etat["piece"]:
                 t, h, p = etat["piece"]
                 print("CLIMAT %d %d %d" % (round(t * 10), round(h), round(p)))
-        elif etat["piece"] is not None and capteur.mesure() is None:
-            etat["piece"] = None  # mesure absente ou de plus de 60 s : l'écran affiche « --° »
+        else:
+            if etat["piece"] is not None and capteur.mesure() is None:
+                etat["piece"] = None  # mesure absente ou de plus de 60 s : l'écran affiche « --° »
+            raison = capteur.erreur_a_envoyer(maintenant)  # Phase 15 : l'agent marque la mesure absente
+            if raison:
+                print("CLIMAT ERR %s" % raison)
         if etat["connecte"] and time.ticks_diff(maintenant, derniere_donnee) > ATTENTE_ABSENT:
             etat["connecte"] = False
         # Phase 14-bis : plus aucune ligne CLIM depuis 2 min (PC arrêté, téléphone hors ligne…) :

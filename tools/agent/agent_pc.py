@@ -1942,6 +1942,7 @@ class Agent:
         self.rot_esp = 180 if int(charger_preferences().get("rot_esp", 0)) == 180 else 0
         self.piece = {}          # Phase 13 : dernière mesure du capteur (CLIMAT), voir lire_climat
         self.piece_vue = None    # Phase 14-bis : une mesure récente (moins de 30 s) est-elle reçue ?
+        self.piece_erreur = None  # Phase 15 : raison de « CLIMAT ERR » (absent, i2c, aberrant)
         self.clim = None         # Phase 13 : état de la clim donné par le téléphone (/clim_maj)
         self.clim_envoye = 0.0   # Phase 14 : heure du dernier envoi de la ligne CLIM à l'ESP32
         self.clim_recu = 0.0     # Phase 14-bis : heure du dernier /clim_maj reçu du téléphone
@@ -2486,12 +2487,20 @@ class Agent:
         }
 
     def lire_climat(self, ligne):
-        """CLIMAT t10 humidité pression : mesure du capteur branché sur l'ESP32 (t10 = 10 × °C)."""
+        """CLIMAT t10 humidité pression : mesure valide du capteur de l'ESP32 (t10 = 10 × °C, humidité -1
+        sans AHT20, pression 0 sans BMP280). CLIMAT ERR raison : plus de mesure, elle est marquée absente."""
+        mots = ligne.split()
+        if len(mots) >= 2 and mots[1] == "ERR":
+            self.piece = {}
+            self.piece_erreur = mots[2] if len(mots) > 2 else "?"
+            self._suivre_piece()
+            return
         try:
-            t10, h, p = [int(x) for x in ligne.split()[1:4]]
+            t10, h, p = [int(x) for x in mots[1:4]]
         except ValueError:
             return
         self.piece = {"t": t10 / 10.0, "h": h, "p": p, "vu": time.time()}
+        self.piece_erreur = None
         self._suivre_piece()
 
     def _suivre_piece(self):
@@ -2503,13 +2512,13 @@ class Agent:
             if recente:
                 print("[agent] capteur : mesures reçues (%.1f °C, %d %%, %d hPa)" % (p["t"], p["h"], p["p"]))
             else:
-                print("[agent] capteur : plus de mesure depuis 30 s (câblage ?)")
+                print("[agent] capteur : mesure absente (%s)" % (self.piece_erreur or "rien depuis 30 s"))
 
     def piece_pour_app(self):
-        """Pour /clim_mesure et l'app : la mesure, ou ok=False si elle a plus de 30 s."""
+        """Pour /clim_mesure et l'app : la mesure, ou ok=False + absent=True si elle manque ou a plus de 30 s."""
         p = self.piece
         if not p or time.time() - p["vu"] > 30:
-            return {"ok": False}
+            return {"ok": False, "absent": True, "raison": self.piece_erreur or "ancienne"}
         return {"ok": True, "t": p["t"], "h": p["h"], "p": p["p"], "age": round(time.time() - p["vu"])}
 
     def clim_maj(self, d):
