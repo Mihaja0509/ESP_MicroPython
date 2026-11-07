@@ -63,6 +63,10 @@ object ClimPlan {
     @Volatile
     private var autoProchain = 0L
 
+    /** Pourquoi l'automatisme attend alors qu'un seuil est dépassé (affiché) ; "" = rien à signaler. */
+    @Volatile
+    private var autoRaison = ""
+
     private const val TAG = "ClimPlan"
 
     private fun p(c: Context) = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -400,7 +404,7 @@ object ClimPlan {
         val phase = when (p(c).getString("phase", "idle")) {
             "cool" -> "cooling"
             "dry" -> "drying"
-            else -> "waiting"
+            else -> "waiting" + if (autoRaison.isEmpty()) "" else " ($autoRaison)"
         }
         return "Auto: room %.1f° %s — %s".format(Locale.US, m.t, h, phase)
     }
@@ -455,6 +459,7 @@ object ClimPlan {
             "fenA" to (f?.optInt("a") ?: 0),
             "auto" to (pr.getString("auto", "") ?: ""),
             "autoPause" to pr.getLong("auto_pause_jusqua", 0),
+            "autoTexte" to texteAuto(c, System.currentTimeMillis()),
             "prochain" to prochainTexte(c, System.currentTimeMillis()),
             "journal" to (pr.getString("journal", "") ?: ""),
         )
@@ -507,7 +512,11 @@ object ClimPlan {
 
     // ------------------------------------------------------------------ automatisme (étape F)
     fun setAuto(c: Context, json: String) {
-        p(c).edit().putString("auto", json).putLong("auto_pause_jusqua", 0).apply()
+        val etaitActif = autoActif(c)
+        val e = p(c).edit().putString("auto", json).putLong("auto_pause_jusqua", 0)
+        // on (ré)active Auto : c'est une demande explicite, l'action manuelle d'avant ne compte plus
+        if (!etaitActif && JSONObject(json).optBoolean("actif")) e.remove("manuel_jusqua")
+        e.apply()
         annuler(c, CODE_AUTO)
         autoProchain = 0L // vérification au prochain tour du service
         if (!JSONObject(json).optBoolean("actif")) {
@@ -570,19 +579,35 @@ object ClimPlan {
                 pr.edit().putString("phase", "idle").apply()
             }
             else -> {
-                if (allume(c)) return // la clim tourne déjà (lancée à la main) : on n'y touche pas
-                if (maintenant < pr.getLong("manuel_jusqua", 0)) return
-                if (maintenant - pr.getLong("dernier_off", 0) < PAUSE_COMPRESSEUR_MS) return
-                if (t >= tOn) {
-                    // plus il fait chaud, plus elle tourne longtemps
-                    val minutes = min(180, max(10, base + (extra * (t - tOn)).toInt()))
-                    if (allumer(c)) {
-                        pr.edit().putString("phase", "cool").putLong("auto_fin", maintenant + minutes * 60_000L).apply()
-                        notifier(c, "AC on (auto): %.1f °C, off in %d min".format(t, minutes))
+                val dernierOff = pr.getLong("dernier_off", 0)
+                val manuel = pr.getLong("manuel_jusqua", 0)
+                val voulu = AutoRegles.mode(t, h, tOn, hDry)
+                // même logique qu'avant : déjà allumée à la main, priorité manuelle, pause du compresseur
+                val raison = when (AutoRegles.attente(allume(c), maintenant, manuel, dernierOff, PAUSE_COMPRESSEUR_MS)) {
+                    "on" -> "AC on by hand"
+                    "manuel" -> "manual action, until ${heure(manuel)}"
+                    "compresseur" -> "compressor rest, until ${heure(dernierOff + PAUSE_COMPRESSEUR_MS)}"
+                    else -> ""
+                }
+                val affiche = if (voulu.isEmpty()) "" else raison
+                if (affiche != autoRaison) {
+                    autoRaison = affiche
+                    if (affiche.isNotEmpty()) journal(c, "Auto waiting: $affiche")
+                }
+                if (raison.isNotEmpty()) return
+                when (voulu) {
+                    "cool" -> {
+                        // plus il fait chaud, plus elle tourne longtemps
+                        val minutes = min(180, max(10, base + (extra * (t - tOn)).toInt()))
+                        if (allumer(c)) {
+                            pr.edit().putString("phase", "cool").putLong("auto_fin", maintenant + minutes * 60_000L).apply()
+                            journal(c, "Auto: cool, %.1f °C, %d min".format(Locale.US, t, minutes))
+                            notifier(c, "AC on (auto): %.1f °C, off in %d min".format(t, minutes))
+                        }
                     }
-                } else if (h >= hDry) {
-                    if (allumer(c, "m_dry_power")) {
+                    "dry" -> if (allumer(c, "m_dry_power")) {
                         pr.edit().putString("phase", "dry").putLong("auto_fin", maintenant + dryMin * 60_000L).apply()
+                        journal(c, "Auto: dry, %d %%, %d min".format(Locale.US, h.toInt(), dryMin))
                         notifier(c, "AC on (Dry): humidity %d %%, off in %d min".format(h.toInt(), dryMin))
                     }
                 }

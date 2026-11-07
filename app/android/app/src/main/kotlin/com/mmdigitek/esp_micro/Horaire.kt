@@ -29,3 +29,25 @@ object Horaire {
         return if (on <= off) Pair(true, on) else Pair(false, off)
     }
 }
+
+/** Décisions de l'automatisme (Phase 15), sans Android : testées dans src/test. */
+object AutoRegles {
+    /** Ce qui empêche de démarrer : "on" (déjà allumée), "manuel", "compresseur", ou "" si rien. */
+    fun attente(on: Boolean, maintenant: Long, manuelJusqua: Long, dernierOff: Long, pauseCompresseurMs: Long): String =
+        when {
+            on -> "on"
+            maintenant < manuelJusqua -> "manuel"
+            maintenant - dernierOff < pauseCompresseurMs -> "compresseur"
+            else -> ""
+        }
+
+    /**
+     * Le mode à lancer. Température et humidité sont jugées chacune contre son seuil ; la clim n'a qu'un
+     * mode à la fois, la température passe d'abord. h < 0 : humidité inconnue, jamais de Dry.
+     */
+    fun mode(t: Double, h: Double, tOn: Double, hDry: Int): String = when {
+        t >= tOn -> "cool"
+        h >= 0 && h >= hDry -> "dry"
+        else -> ""
+    }
+}

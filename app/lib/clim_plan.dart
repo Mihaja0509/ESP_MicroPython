@@ -645,6 +645,8 @@ class _CarteClimPlanState extends State<CarteClimPlan> {
                   ? 'Cooling now'
                   : phase == 'dry'
                   ? 'Drying the air now'
+                  : _autoActif && (_rt['autoTexte'] ?? '').toString().isNotEmpty
+                  ? (_rt['autoTexte'] as String).replaceFirst('Auto: ', '')
                   : 'Watching the room every minute',
               style: const TextStyle(fontSize: 11, color: Couleurs.gris),
             ),

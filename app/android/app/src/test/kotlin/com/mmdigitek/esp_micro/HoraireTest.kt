@@ -82,4 +82,31 @@ class HoraireTest {
         assertTrue(matin.first)
         assertEquals(instant(8, 23, 0), matin.second)
     }
+
+    @Test
+    fun autoTemperatureSeuleSuffit() {
+        assertEquals("cool", AutoRegles.mode(30.1, 66.0, 28.0, 70)) // 66 % n'empêche pas le froid
+        assertEquals("cool", AutoRegles.mode(28.0, 40.0, 28.0, 70))
+    }
+
+    @Test
+    fun autoHumiditeSeuleSuffit() {
+        assertEquals("dry", AutoRegles.mode(25.0, 75.0, 28.0, 70))
+        assertEquals("", AutoRegles.mode(25.0, 66.0, 28.0, 70))
+        assertEquals("", AutoRegles.mode(25.0, -1.0, 28.0, 70))
+    }
+
+    @Test
+    fun autoLesDeuxSeuilsLaTemperatureDabord() {
+        assertEquals("cool", AutoRegles.mode(30.0, 75.0, 28.0, 70))
+    }
+
+    @Test
+    fun autoRaisonsDAttente() {
+        val pause = 180_000L
+        assertEquals("on", AutoRegles.attente(true, 1_000_000, 0, 0, pause))
+        assertEquals("manuel", AutoRegles.attente(false, 1_000_000, 1_000_001, 0, pause))
+        assertEquals("compresseur", AutoRegles.attente(false, 1_000_000, 0, 900_000, pause))
+        assertEquals("", AutoRegles.attente(false, 1_000_000, 1_000_000, 800_000, pause))
+    }
 }
