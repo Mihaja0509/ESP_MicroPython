@@ -11,7 +11,7 @@ const _canal = MethodChannel('dadou/clim');
 
 Future<List<MethodCall>> _monter(
   WidgetTester tester, {
-  int versionNative = 2,
+  int versionNative = 3,
 }) async {
   SharedPreferences.setMockInitialValues({});
   final appels = <MethodCall>[];

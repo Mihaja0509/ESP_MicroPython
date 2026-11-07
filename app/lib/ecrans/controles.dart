@@ -10,6 +10,7 @@ import '../connexion.dart';
 import '../etat.dart';
 import '../theme.dart';
 import 'clim.dart';
+import 'clim_fond.dart';
 import 'editeur_raccourci.dart';
 
 class EcranControles extends StatefulWidget {
@@ -57,6 +58,8 @@ class _EcranControlesState extends State<EcranControles> {
         CarteClim(jeu: e.enJeu),
         const SizedBox(height: 14),
         CarteClimPlan(etat: e, jeu: e.enJeu),
+        const SizedBox(height: 14),
+        CarteClimFond(jeu: e.enJeu),
         const SizedBox(height: 14),
         _carteLanceur(e),
       ],

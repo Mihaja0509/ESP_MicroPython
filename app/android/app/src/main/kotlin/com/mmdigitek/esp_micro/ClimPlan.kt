@@ -25,7 +25,8 @@ import kotlin.math.min
 /**
  * Clim programmée (Phase 13) : minuteur, plage horaire et mode automatique (capteur de la pièce).
  * Les trames IR (durées en µs) sont calculées par Dart (lib/clim_ir.dart) et rangées ici.
- * Alarmes exactes -> ClimReceiver -> executer(). État dans les préférences « clim_plan ».
+ * Heures fixes : setAlarmClock -> ClimReceiver -> executer(). Automatisme et republication : ClimService.
+ * État dans les préférences « clim_plan » : seule source de vérité (app, service, notification).
  */
 object ClimPlan {
     private const val PREFS = "clim_plan"
@@ -45,9 +46,20 @@ object ClimPlan {
      * (Phase 14). Un rechargement à chaud ne met à jour que le Dart : si le Kotlin installé est plus
      * ancien, Dart le voit et refuse d'envoyer des secondes que l'ancien code lirait comme des minutes.
      */
-    const val VERSION = 2
+    const val VERSION = 3 // 3 = service de premier plan et canaux fond / ouvrirReglage (Phase 15)
     private const val PAUSE_COMPRESSEUR_MS = 3 * 60_000L // le compresseur ne redémarre pas avant 3 min
     private const val MANUEL_MS = 30 * 60_000L           // après une action à la main, l'auto se tait
+    private const val PAUSE_AUTO_MS = 30 * 60_000L       // bouton « Pause auto 30 min »
+    private const val AUTO_MS = 60_000L                  // vérification de l'automatisme
+
+    /** Dernière mesure de l'automatisme : null = capteur ou PC injoignable. */
+    private class Mesure(val t: Double, val h: Double)
+
+    @Volatile
+    private var derniereMesure: Mesure? = null
+
+    @Volatile
+    private var autoProchain = 0L
 
     private const val TAG = "ClimPlan"
 
@@ -56,12 +68,12 @@ object ClimPlan {
     private fun heure(ms: Long, format: String = "HH:mm"): String =
         SimpleDateFormat(format, Locale.US).format(Date(ms))
 
-    /** Trace chaque décision : logcat (tag ClimPlan) + 12 dernières lignes pour l'app (sans adb). */
+    /** Trace chaque décision : logcat (tag ClimPlan) + 20 dernières lignes pour l'app (sans adb). */
     @Synchronized
     fun journal(c: Context, texte: String) {
         Log.i(TAG, texte)
         val lignes = (p(c).getString("journal", "") ?: "").split("\n").filter { it.isNotEmpty() }
-        val nouvelles = (lignes + "${heure(System.currentTimeMillis(), "dd/MM HH:mm:ss")} $texte").takeLast(12)
+        val nouvelles = (lignes + "${heure(System.currentTimeMillis(), "dd/MM HH:mm:ss")} $texte").takeLast(20)
         p(c).edit().putString("journal", nouvelles.joinToString("\n")).apply()
     }
 
@@ -74,7 +86,7 @@ object ClimPlan {
             .putString("mode", mode)
             .putInt("temp", temp)
             .apply()
-        publier(c)
+        changement(c)
     }
 
     fun allume(c: Context) = p(c).getBoolean("on", false)
@@ -87,7 +99,7 @@ object ClimPlan {
             annuler(c, CODE_MIN_OFF)
         }
         e.apply()
-        publier(c)
+        changement(c)
     }
 
     private fun motif(c: Context, cle: String): IntArray? {
@@ -223,7 +235,7 @@ object ClimPlan {
         }
         p(c).edit().putLong("minuteur_fin", fin).apply()
         armerHeureFixe(c, CODE_MIN_OFF, fin)
-        publier(c)
+        changement(c)
         return true
     }
 
@@ -231,7 +243,7 @@ object ClimPlan {
         annuler(c, CODE_MIN_ON)
         annuler(c, CODE_MIN_OFF)
         p(c).edit().putLong("minuteur_fin", 0).putLong("minuteur_debut", 0).apply()
-        publier(c)
+        changement(c)
     }
 
     // ------------------------------------------------------------------ plage horaire
@@ -243,7 +255,7 @@ object ClimPlan {
         annuler(c, CODE_FEN_OFF)
         journal(c, "Window ${if (actif) "enabled" else "disabled"}: on $de off $a (minutes)")
         armerFenetre(c)
-        publier(c) // Phase 14 : l'écran de l'ESP32 sait qu'une plage horaire est active
+        changement(c) // Phase 14 : l'écran de l'ESP32 sait qu'une plage horaire est active
     }
 
     /** Arme les deux alarmes de la plage à leur prochaine occurrence (modification, boot, ouverture de l'app). */
@@ -279,9 +291,28 @@ object ClimPlan {
             CODE_MIN_ON -> if (allumer(c)) notifier(c, "Timer: AC turned on")
             CODE_FEN_ON -> if (allumer(c)) notifier(c, "Schedule: AC turned on")
             CODE_FEN_OFF -> if (eteindre(c)) notifier(c, "Schedule: AC turned off")
-            CODE_AUTO -> auto(c)
         }
-        publier(c, attendre = true) // dans le fil du récepteur : l'envoi finit avant la fin de l'alarme
+        changement(c, attendre = true) // dans le fil du récepteur : l'envoi finit avant la fin de l'alarme
+    }
+
+    // ------------------------------------------------------------------ boutons de la notification
+    fun actionEteindre(c: Context) {
+        val ok = eteindre(c)
+        annuler(c, CODE_MIN_ON)
+        annuler(c, CODE_MIN_OFF)
+        // priorité manuelle : l'automatisme ne relance pas tout de suite ce qu'on vient de couper
+        p(c).edit()
+            .putLong("minuteur_debut", 0)
+            .putLong("manuel_jusqua", System.currentTimeMillis() + MANUEL_MS)
+            .apply()
+        journal(c, "Notification: turn off (IR sent: $ok)")
+        changement(c, attendre = true)
+    }
+
+    fun actionPauseAuto(c: Context) {
+        p(c).edit().putLong("auto_pause_jusqua", System.currentTimeMillis() + PAUSE_AUTO_MS).apply()
+        journal(c, "Notification: auto paused for 30 min")
+        changement(c, attendre = true)
     }
 
     /** Après un redémarrage du téléphone ou une mise à jour de l'app. */
@@ -293,16 +324,107 @@ object ClimPlan {
         val fin = pr.getLong("minuteur_fin", 0)
         if (fin > 0) armerHeureFixe(c, CODE_MIN_OFF, max(fin, maintenant + 5_000))
         armerFenetre(c)
-        pr.getString("auto", null)?.let {
-            if (JSONObject(it).optBoolean("actif")) programmer(c, CODE_AUTO, maintenant + 30_000)
+        annuler(c, CODE_AUTO) // ancienne alarme répétée : l'automatisme tourne dans ClimService
+        changement(c) // relance le service et la republication
+    }
+
+    // ------------------------------------------------------------------ service et notification
+    private fun autoActif(c: Context) =
+        p(c).getString("auto", null)?.let { JSONObject(it).optBoolean("actif") } ?: false
+
+    /** Quelque chose à surveiller ? Le service tourne tant que c'est vrai. */
+    fun actif(c: Context): Boolean {
+        val pr = p(c)
+        return pr.getLong("minuteur_fin", 0) > 0 || pr.getLong("minuteur_debut", 0) > 0 ||
+            fen(c)?.optBoolean("actif") == true || autoActif(c)
+    }
+
+    /** L'état a changé : démarre / arrête le service (sa notification suit) et prévient le PC. */
+    fun changement(c: Context, attendre: Boolean = false) {
+        synchroService(c)
+        publier(c, attendre)
+    }
+
+    private fun synchroService(c: Context) {
+        val intention = Intent(c, ClimService::class.java)
+        if (!actif(c)) {
+            c.stopService(intention)
+            return
         }
-        publier(c) // relance la republication toutes les 30 s
+        try {
+            ContextCompat.startForegroundService(c, intention)
+        } catch (e: IllegalStateException) {
+            // Android refuse le démarrage en arrière-plan : les alarmes d'heures fixes restent armées
+            journal(c, "Service start refused: $e")
+        }
+    }
+
+    /** Ce que montre la notification. Comparable : pas de mise à jour si rien n'a changé. */
+    data class VueNotif(
+        val titre: String,
+        val lignes: List<String>,
+        val compteFin: Long,
+        val on: Boolean,
+        val minuteur: Boolean,
+        val auto: Boolean,
+    )
+
+    private fun prochainTexte(c: Context, maintenant: Long): String {
+        val f = fen(c) ?: return ""
+        if (!f.optBoolean("actif")) return ""
+        val (on, quand) = Horaire.prochainEvenement(maintenant, f.optInt("de"), f.optInt("a"))
+        return "Next: ${if (on) "ON" else "OFF"} ${heure(quand)}"
+    }
+
+    private fun texteAuto(c: Context, maintenant: Long): String {
+        val pause = p(c).getLong("auto_pause_jusqua", 0)
+        if (pause > maintenant) return "Auto: paused until ${heure(pause)}"
+        val m = derniereMesure
+            ?: return "Auto: room -- (no sensor or PC)"
+        val h = if (m.h >= 0) "%d %%".format(Locale.US, m.h.toInt()) else "-- %"
+        val phase = when (p(c).getString("phase", "idle")) {
+            "cool" -> "cooling"
+            "dry" -> "drying"
+            else -> "waiting"
+        }
+        return "Auto: room %.1f° %s — %s".format(Locale.US, m.t, h, phase)
+    }
+
+    fun vueNotif(c: Context): VueNotif {
+        val pr = p(c)
+        val maintenant = System.currentTimeMillis()
+        val on = allume(c)
+        val phase = pr.getString("phase", "idle") ?: "idle"
+        val mode = if (phase == "dry" && on) "dry" else (pr.getString("mode", "cool") ?: "cool")
+        val titre = if (on) {
+            "${mode.replaceFirstChar { it.uppercase() }} ${pr.getInt("temp", 24)}°C on"
+        } else {
+            "Off"
+        }
+        val lignes = mutableListOf<String>()
+        val debut = pr.getLong("minuteur_debut", 0)
+        val finMinuteur = pr.getLong("minuteur_fin", 0)
+        val minuteur = finMinuteur > maintenant
+        if (debut > maintenant) lignes.add("Timer: on at ${heure(debut)}")
+        if (minuteur) lignes.add("Timer: off at ${heure(finMinuteur)}")
+        prochainTexte(c, maintenant).takeIf { it.isNotEmpty() }?.let { lignes.add(it) }
+        val auto = autoActif(c)
+        if (auto) lignes.add(texteAuto(c, maintenant))
+        val finAuto = if (phase != "idle" && on) pr.getLong("auto_fin", 0) else 0L
+        val compte = when {
+            minuteur && on -> finMinuteur
+            debut > maintenant -> debut
+            finAuto > maintenant -> finAuto
+            else -> 0L
+        }
+        return VueNotif(titre, lignes, compte, on, minuteur || debut > maintenant, auto)
     }
 
     // ------------------------------------------------------------------ pour l'app
     fun etat(c: Context): Map<String, Any> {
         val pr = p(c)
         val am = c.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val f = fen(c)
         // clim éteinte : jamais de compte à rebours affiché (pas d'état figé)
         return mapOf(
             "on" to allume(c),
@@ -310,21 +432,30 @@ object ClimPlan {
             "phase" to (pr.getString("phase", "idle") ?: "idle"),
             "autoFin" to pr.getLong("auto_fin", 0),
             "exact" to (Build.VERSION.SDK_INT < 31 || am.canScheduleExactAlarms()),
+            // Phase 15 : l'app lit les réglages ici, ClimPlan reste la seule source de vérité
+            "service" to ClimService.enCours,
+            "fenActif" to (f?.optBoolean("actif") ?: false),
+            "fenConnue" to (f != null),
+            "fenDe" to (f?.optInt("de") ?: 0),
+            "fenA" to (f?.optInt("a") ?: 0),
+            "auto" to (pr.getString("auto", "") ?: ""),
+            "autoPause" to pr.getLong("auto_pause_jusqua", 0),
+            "prochain" to prochainTexte(c, System.currentTimeMillis()),
+            "journal" to (pr.getString("journal", "") ?: ""),
         )
     }
 
     /**
      * Dit au PC (agent) où en est la clim : il l'affiche sur l'écran de l'ESP32.
-     * - [attendre] = false : l'envoi part dans un fil (appel depuis l'app) ; true : dans le fil courant.
-     * - Tant qu'il y a quelque chose à dire (clim allumée, minuteur, plage ou automatisme), une alarme
-     *   CODE_REPUB republie l'état toutes les 30 s (10 s si l'agent n'a pas répondu) : un PC allumé
-     *   après coup retrouve le minuteur en cours en moins de 30 s.
+     * Le service republie toutes les 30 s (10 s après un échec) : un PC allumé après coup retrouve le
+     * minuteur en cours. Service arrêté mais clim allumée : l'alarme CODE_REPUB prend le relais.
+     * Renvoie false si le PC n'a pas répondu.
      */
-    fun publier(c: Context, attendre: Boolean = false) {
+    fun publierMaintenant(c: Context): Boolean {
         val fp = c.getSharedPreferences(VeilleurPC.PREFS, Context.MODE_PRIVATE)
         val adresse = fp.getString("flutter.adresse", "") ?: ""
         val token = fp.getString("flutter.token", "") ?: ""
-        if (adresse.isEmpty() || token.isEmpty()) return
+        if (adresse.isEmpty() || token.isEmpty()) return true
         val pr = p(c)
         val maintenant = System.currentTimeMillis()
         val phase = pr.getString("phase", "idle") ?: "idle"
@@ -334,21 +465,26 @@ object ClimPlan {
         // Clim éteinte : toujours 0 (jamais un reste de compte à rebours fantôme).
         val reste = if (allume(c) && fin > maintenant) ((fin - maintenant + 999L) / 1_000L).toInt() else 0
         val mode = if (phase == "dry" && allume(c)) "dry" else (pr.getString("mode", "cool") ?: "cool")
-        val auto = pr.getString("auto", null)?.let { JSONObject(it).optBoolean("actif") } ?: false
         // plage horaire active : « de-a » en minutes depuis minuit (ex. 1140-1260), sinon 0
         val f = fen(c)
         val plage = if (f != null && f.optBoolean("actif")) "${f.optInt("de")}-${f.optInt("a")}" else "0"
         val chemin = "/clim_maj?on=${if (allume(c)) 1 else 0}&mode=$mode&temp=${pr.getInt("temp", 24)}" +
-            "&reste=$reste&auto=${if (auto) 1 else 0}&plage=$plage"
-        // y a-t-il quelque chose à republier ? sinon l'alarme de republication s'arrête
-        val besoin = allume(c) || reste > 0 || plage != "0" || auto
-        if (besoin) programmer(c, CODE_REPUB, maintenant + REPUB_MS) else annuler(c, CODE_REPUB)
+            "&reste=$reste&auto=${if (autoActif(c)) 1 else 0}&plage=$plage"
+        return try {
+            VeilleurPC.lire(adresse, token, chemin)
+            true
+        } catch (e: Exception) {
+            false // PC éteint ou injoignable
+        }
+    }
+
+    /** [attendre] = false : l'envoi part dans un fil (appel depuis l'app) ; true : dans le fil courant. */
+    fun publier(c: Context, attendre: Boolean = false) {
+        val relais = allume(c) && !actif(c) // personne d'autre ne republiera : alarme de secours
+        if (relais) programmer(c, CODE_REPUB, System.currentTimeMillis() + REPUB_MS) else annuler(c, CODE_REPUB)
         val envoi = {
-            try {
-                VeilleurPC.lire(adresse, token, chemin)
-            } catch (e: Exception) {
-                // PC éteint ou injoignable : nouvelle tentative bientôt (plus vite que les 30 s)
-                if (besoin) programmer(c, CODE_REPUB, System.currentTimeMillis() + REPUB_RETENTE_MS)
+            if (!publierMaintenant(c) && relais) {
+                programmer(c, CODE_REPUB, System.currentTimeMillis() + REPUB_RETENTE_MS)
             }
         }
         if (attendre) envoi() else Thread { envoi() }.start()
@@ -356,14 +492,24 @@ object ClimPlan {
 
     // ------------------------------------------------------------------ automatisme (étape F)
     fun setAuto(c: Context, json: String) {
-        p(c).edit().putString("auto", json).apply()
+        p(c).edit().putString("auto", json).putLong("auto_pause_jusqua", 0).apply()
         annuler(c, CODE_AUTO)
-        if (JSONObject(json).optBoolean("actif")) {
-            programmer(c, CODE_AUTO, System.currentTimeMillis() + 5_000)
-        } else {
+        autoProchain = 0L // vérification au prochain tour du service
+        if (!JSONObject(json).optBoolean("actif")) {
             p(c).edit().putString("phase", "idle").apply()
+            derniereMesure = null
         }
-        publier(c)
+        changement(c)
+    }
+
+    /** Appelé par ClimService : un passage de l'automatisme toutes les 60 s. */
+    fun ticAuto(c: Context) {
+        val maintenant = System.currentTimeMillis()
+        if (maintenant < autoProchain) return
+        autoProchain = maintenant + AUTO_MS
+        val avant = allume(c)
+        auto(c)
+        if (allume(c) != avant) publier(c, attendre = true)
     }
 
     private fun lireMesure(c: Context): JSONObject? {
@@ -382,10 +528,15 @@ object ClimPlan {
     private fun auto(c: Context) {
         val cfg = p(c).getString("auto", null)?.let { JSONObject(it) } ?: return
         if (!cfg.optBoolean("actif")) return
-        programmer(c, CODE_AUTO, System.currentTimeMillis() + 60_000) // prochain passage dans 1 min
-        val mesure = lireMesure(c) ?: return // capteur ou PC injoignable : on ne fait rien
+        val mesure = lireMesure(c)
+        if (mesure == null) { // capteur ou PC injoignable : on ne fait rien
+            derniereMesure = null
+            return
+        }
         val t = mesure.optDouble("t")
-        val h = mesure.optDouble("h")
+        val h = mesure.optDouble("h", -1.0) // -1 : pas d'humidité (AHT20 absent, BMP280 seul)
+        derniereMesure = Mesure(t, h)
+        if (System.currentTimeMillis() < p(c).getLong("auto_pause_jusqua", 0)) return
         val tOn = cfg.optDouble("t_on", 28.0)
         val tOff = cfg.optDouble("t_off", 25.0)
         val base = cfg.optInt("base", 30)
@@ -399,7 +550,7 @@ object ClimPlan {
                 if (eteindre(c)) notifier(c, "AC off (auto): %.1f °C".format(t))
                 pr.edit().putString("phase", "idle").apply()
             }
-            "dry" -> if (h <= hDry - 8 || maintenant >= pr.getLong("auto_fin", 0)) {
+            "dry" -> if ((h >= 0 && h <= hDry - 8) || maintenant >= pr.getLong("auto_fin", 0)) {
                 if (eteindre(c)) notifier(c, "AC off (auto): humidity %d %%".format(h.toInt()))
                 pr.edit().putString("phase", "idle").apply()
             }
@@ -450,6 +601,12 @@ object ClimPlan {
 
 /** Reçoit les alarmes (minuteur, plage horaire, automatisme) et le redémarrage du téléphone. */
 class ClimReceiver : BroadcastReceiver() {
+    companion object {
+        const val ACTION_OFF = "dadou.clim.action.OFF"
+        const val ACTION_ANNULER = "dadou.clim.action.ANNULER"
+        const val ACTION_PAUSE = "dadou.clim.action.PAUSE"
+    }
+
     override fun onReceive(context: Context, intent: Intent) {
         val appli = context.applicationContext
         when (intent.action) {
@@ -465,7 +622,12 @@ class ClimReceiver : BroadcastReceiver() {
         val attente = goAsync()
         Thread {
             try {
-                ClimPlan.executer(appli, code)
+                when (intent.action) {
+                    ACTION_OFF -> ClimPlan.actionEteindre(appli)
+                    ACTION_ANNULER -> ClimPlan.annulerMinuteur(appli)
+                    ACTION_PAUSE -> ClimPlan.actionPauseAuto(appli)
+                    else -> ClimPlan.executer(appli, code)
+                }
             } catch (e: Exception) {
                 // une alarme ratée ne doit jamais faire planter l'app
                 ClimPlan.journal(appli, "Alarm $code error: $e")

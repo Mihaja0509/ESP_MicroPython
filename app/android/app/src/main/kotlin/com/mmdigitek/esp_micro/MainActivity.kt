@@ -1,13 +1,19 @@
 package com.mmdigitek.esp_micro
 
 import android.Manifest
+import android.app.AlarmManager
 import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.hardware.ConsumerIrManager
+import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
+import android.provider.Settings
 import androidx.core.app.ActivityCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -98,13 +104,16 @@ class MainActivity : FlutterActivity() {
                         resultat.success(true)
                     }
                     "version" -> resultat.success(ClimPlan.VERSION)
-                    "minuteur" -> resultat.success(
-                        ClimPlan.minuteur(
-                            c,
-                            appel.argument<Int>("secondes") ?: 1800,
-                            appel.argument<Int>("delaiSecondes") ?: 0
+                    "minuteur" -> {
+                        demanderPermission()
+                        resultat.success(
+                            ClimPlan.minuteur(
+                                c,
+                                appel.argument<Int>("secondes") ?: 1800,
+                                appel.argument<Int>("delaiSecondes") ?: 0
+                            )
                         )
-                    )
+                    }
                     "annulerMinuteur" -> {
                         ClimPlan.annulerMinuteur(c)
                         resultat.success(true)
@@ -116,10 +125,12 @@ class MainActivity : FlutterActivity() {
                             appel.argument<Int>("de") ?: 0,
                             appel.argument<Int>("a") ?: 0
                         )
+                        if (ClimPlan.actif(c)) demanderPermission()
                         resultat.success(true)
                     }
                     "auto" -> {
                         ClimPlan.setAuto(c, appel.argument<String>("json") ?: "{}")
+                        if (ClimPlan.actif(c)) demanderPermission()
                         resultat.success(true)
                     }
                     "publier" -> {
@@ -127,6 +138,11 @@ class MainActivity : FlutterActivity() {
                         resultat.success(true)
                     }
                     "etat" -> resultat.success(ClimPlan.etat(c))
+                    "fond" -> resultat.success(etatFond())
+                    "ouvrirReglage" -> {
+                        ouvrirReglage(appel.argument<String>("quoi") ?: "")
+                        resultat.success(true)
+                    }
                     else -> resultat.notImplemented()
                 }
             }
@@ -136,6 +152,61 @@ class MainActivity : FlutterActivity() {
         val prefs = getSharedPreferences(VeilleurPC.PREFS, Context.MODE_PRIVATE)
         if (prefs.getBoolean("flutter.notif_actif", false)) {
             VeilleurPC.programmer(applicationContext, true)
+        }
+    }
+
+    /** Phase 15 : carte « Background » de l'app. */
+    private fun etatFond(): Map<String, Any> {
+        val am = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        return mapOf(
+            "notifs" to NotificationManagerCompat.from(this).areNotificationsEnabled(),
+            "exact" to (Build.VERSION.SDK_INT < 31 || am.canScheduleExactAlarms()),
+            "batterie" to pm.isIgnoringBatteryOptimizations(packageName),
+            "autostart" to (packageManager.resolveActivity(intentionAutostart(), 0) != null),
+        )
+    }
+
+    private fun intentionAutostart() = Intent().setComponent(
+        ComponentName("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity")
+    )
+
+    private fun detailsApp() =
+        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))
+
+    /** Ouvre l'écran système demandé ; s'il n'existe pas : la fiche de l'app, jamais de plantage. */
+    private fun ouvrirReglage(quoi: String) {
+        val paquet = Uri.parse("package:$packageName")
+        val cible = when (quoi) {
+            "notifs" -> {
+                if (Build.VERSION.SDK_INT >= 33 &&
+                    ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
+                    PackageManager.PERMISSION_GRANTED &&
+                    shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS)
+                ) {
+                    demanderPermission()
+                    return
+                }
+                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+            }
+            "exact" -> if (Build.VERSION.SDK_INT >= 31) {
+                Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, paquet)
+            } else {
+                detailsApp()
+            }
+            "batterie" -> Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, paquet)
+            "autostart" -> intentionAutostart()
+            else -> detailsApp()
+        }
+        try {
+            startActivity(cible)
+        } catch (e: Exception) { // écran absent, ou refusé par la surcouche du fabricant
+            try {
+                startActivity(detailsApp())
+            } catch (e2: Exception) {
+                ClimPlan.journal(applicationContext, "Cannot open settings: $e2")
+            }
         }
     }
 

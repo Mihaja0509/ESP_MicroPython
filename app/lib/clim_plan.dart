@@ -48,8 +48,21 @@ class ClimPlan {
       _appeler('auto', {'json': jsonEncode(reglages)});
   static Future<void> publier() => _appeler('publier');
 
+  /// Réglages Android qui peuvent bloquer le fond (carte « Background »).
+  static Future<Map<String, dynamic>> fond() async {
+    try {
+      final r = await _canal.invokeMethod<Map>('fond');
+      return r == null ? <String, dynamic>{} : Map<String, dynamic>.from(r);
+    } catch (_) {
+      return <String, dynamic>{};
+    }
+  }
+
+  static Future<void> ouvrirReglage(String quoi) =>
+      _appeler('ouvrirReglage', {'quoi': quoi});
+
   /// Version de la partie Android attendue par ce Dart (voir ClimPlan.VERSION côté Kotlin).
-  static const int versionAttendue = 2;
+  static const int versionAttendue = 3;
 
   /// Version de la partie Android installée. 0 = injoignable ou trop ancienne (un rechargement à
   /// chaud ne met à jour que le Dart : il faut réinstaller l'APK).
@@ -249,6 +262,23 @@ class _CarteClimPlanState extends State<CarteClimPlan> {
       _extra = p.getInt('auto_extra') ?? 3;
       _hDry = p.getInt('auto_h_dry') ?? 70;
       _dryMin = p.getInt('auto_dry_min') ?? 45;
+      // Phase 15 : les réglages en service viennent d'Android (source de vérité unique)
+      if (rt['fenConnue'] == true) {
+        _fenActif = rt['fenActif'] == true;
+        _fenDe = (rt['fenDe'] as num?)?.toInt() ?? _fenDe;
+        _fenA = (rt['fenA'] as num?)?.toInt() ?? _fenA;
+      }
+      final auto = (rt['auto'] ?? '').toString();
+      if (auto.isNotEmpty) {
+        final a = jsonDecode(auto) as Map<String, dynamic>;
+        _autoActif = a['actif'] == true;
+        _tOn = (a['t_on'] as num?)?.toInt() ?? _tOn;
+        _tOff = (a['t_off'] as num?)?.toInt() ?? _tOff;
+        _base = (a['base'] as num?)?.toInt() ?? _base;
+        _extra = (a['extra'] as num?)?.toInt() ?? _extra;
+        _hDry = (a['h_dry'] as num?)?.toInt() ?? _hDry;
+        _dryMin = (a['dry_min'] as num?)?.toInt() ?? _dryMin;
+      }
       _rt = rt;
     });
     ClimPlan.publier(); // l'écran de l'ESP32 se met à jour à l'ouverture de l'app
@@ -458,6 +488,10 @@ class _CarteClimPlanState extends State<CarteClimPlan> {
         : 0;
     final erreurDuree = verifierDuree(_duree);
     final phase = (_rt['phase'] ?? 'idle').toString();
+    final prochain = (_rt['prochain'] ?? '').toString();
+    final pauseAuto = (_rt['autoPause'] as num?)?.toInt() ?? 0;
+    final enPause = pauseAuto > DateTime.now().millisecondsSinceEpoch;
+    final finPause = DateTime.fromMillisecondsSinceEpoch(pauseAuto);
     final t = e.pieceT;
     final piece = t == null
         ? 'Room: -- °C · -- %'
@@ -566,6 +600,12 @@ class _CarteClimPlanState extends State<CarteClimPlan> {
             dense: true,
             contentPadding: EdgeInsets.zero,
             title: Text('On at ${_hhmm(_fenDe)}, off at ${_hhmm(_fenA)}'),
+            subtitle: prochain.isEmpty
+                ? null
+                : Text(
+                    prochain,
+                    style: const TextStyle(fontSize: 11, color: Couleurs.gris),
+                  ),
             value: _fenActif,
             onChanged: (v) {
               setState(() => _fenActif = v);
@@ -595,7 +635,9 @@ class _CarteClimPlanState extends State<CarteClimPlan> {
             contentPadding: EdgeInsets.zero,
             title: const Text('Auto mode'),
             subtitle: Text(
-              phase == 'cool'
+              enPause
+                  ? 'Paused until ${_hhmm(finPause.hour * 60 + finPause.minute)}'
+                  : phase == 'cool'
                   ? 'Cooling now'
                   : phase == 'dry'
                   ? 'Drying the air now'
@@ -650,8 +692,7 @@ class _CarteClimPlanState extends State<CarteClimPlan> {
               style: TextStyle(fontSize: 12, color: Couleurs.orange),
             ),
           const Text(
-            'Keep the phone aimed at the AC and plugged in. In Android settings set Dadou to '
-            '"No restrictions" for battery and allow autostart.',
+            'Keep the phone aimed at the AC and plugged in. Check the Background card below.',
             style: TextStyle(fontSize: 11, color: Couleurs.gris),
           ),
         ],
