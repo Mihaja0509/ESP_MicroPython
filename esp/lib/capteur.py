@@ -75,11 +75,23 @@ class Capteur:
         self._prochain_scan = time.ticks_add(maintenant, REESSAI_MS)
         try:
             self.i2c = I2C(0, sda=Pin(SDA), scl=Pin(SCL), freq=100_000)
-            adresses = self.i2c.scan()
+            adresses = self._sonder()
         except Exception:
             adresses = ()
         self._chercher(adresses)
         self._apres_detection()
+
+    def _sonder(self):
+        """Les adresses qui répondent, parmi celles des deux modules. Jamais i2c.scan() : SCL tenue à 0,
+        il bloque 5,6 s (112 adresses × 50 ms, mesuré) et l'écran ne peut plus se rallumer."""
+        adresses = []
+        for a in (AHT,) + ADRESSES_BMP:
+            try:
+                self.i2c.writeto(a, b"")
+                adresses.append(a)
+            except OSError:
+                pass
+        return adresses
 
     def _chercher(self, adresses):
         """Initialise les modules vus par le scan et pas encore en service."""
@@ -183,7 +195,7 @@ class Capteur:
             return
         self._prochain_scan = time.ticks_add(maintenant, REESSAI_MS)
         try:
-            adresses = self.i2c.scan()
+            adresses = self._sonder()
         except Exception:
             return
         avant = (self._aht, self._bmp)

@@ -28,6 +28,7 @@ class Bus:
     erreurs = 0          # nombre d'accès qui échouent encore (OSError)
     crees = 0            # nombre de fois où le bus a été (re)créé
     scans = 0
+    sondes = []          # adresses sondées
     ecritures = []       # (adresse, octets)
     aht_octets = bytes([0x1C, 0x80, 0x00, 0x06, 0x00, 0x00, 0x00])  # 50 %, 25 °C
 
@@ -48,15 +49,19 @@ class FauxI2C:
             Bus.erreurs -= 1
             raise OSError(110)
 
-    def scan(self):
-        Bus.scans += 1
-        return ([0x38] if Bus.aht else []) + ([0x77] if Bus.bmp else [])
-
+    # pas de scan() ici : capteur.py ne doit plus l'appeler (5,6 s de blocage avec SCL tenue à 0)
     def readfrom(self, adr, n):
         self._acces(Bus.aht)
         return Bus.aht_octets[:n]
 
     def writeto(self, adr, donnees):
+        if not donnees:  # sonde d'une adresse
+            Bus.sondes.append(adr)
+            if adr == 0x38:
+                Bus.scans += 1
+            if not (Bus.aht if adr == 0x38 else (Bus.bmp and adr == 0x77)):
+                raise OSError(19)
+            return
         self._acces(Bus.aht)
         Bus.ecritures.append((adr, bytes(donnees)))
 
@@ -112,7 +117,14 @@ class TestCapteur(unittest.TestCase):
         Bus.aht = Bus.bmp = True
         Bus.erreurs, Bus.crees, Bus.scans = 0, 0, 0
         Bus.ecritures = []
+        Bus.sondes = []
         Bus.aht_octets = bytes([0x1C, 0x80, 0x00, 0x06, 0x00, 0x00, 0x00])
+
+    def test_detection_sonde_seulement_les_3_adresses(self):
+        # SCL tenue à 0 : 50 ms par adresse. 150 ms bloquent à peine la boucle, 112 adresses 5,6 s.
+        Bus.aht = Bus.bmp = False
+        capteur.Capteur()
+        self.assertEqual(Bus.sondes, [0x38, 0x76, 0x77])
 
     def test_mesure_normale(self):
         c = capteur.Capteur()

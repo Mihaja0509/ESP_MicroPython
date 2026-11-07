@@ -13,6 +13,7 @@ Mis à jour : 2026-11-07 · téléphone de test : Xiaomi 25113PN0EC, Android 17 
 | 15.2-bis | `b923a2e` | alarme de garde du service, choisir une heure active la plage |
 | 15.5 | `19b2bd2` | règle R8 (APK release), documentation |
 | 15.6 | `1bf8799` | l'automatisme affiche pourquoi il attend ; réactiver Auto lève la priorité manuelle ; `AutoRegles` + tests |
+| 15.7 | message « Phase 15.7 » | détection du capteur par 3 sondes au lieu de `i2c.scan()` : l'écran se rallume avec SCL bloquée |
 
 Sur le release, `Log.i` n'apparaît pas dans logcat sur ce téléphone : lire le journal de la carte Background, la notification (`dumpsys notification --noredact`) et `agent.log`.
 
@@ -21,6 +22,7 @@ Sur le release, `Log.i` n'apparaît pas dans logcat sur ce téléphone : lire le
 - **Plage horaire** : `clim_plan.xml` contenait `{"actif":false,"de":1350,"a":1410}`. Les heures étaient gardées mais l'interrupteur était éteint : aucune alarme armée. Choisir une heure active maintenant la plage. Facteur aggravant vu dans `dumpsys activity exit-info` : kills HyperOS (`LockScreenClean`, `SwipeUpClean`) et un `FORCE STOP` (qui annule les alarmes) ; d'où le réarmement à chaque ouverture de l'app.
 - **Capteur** : il répond sur SDA=7 / SCL=6, rien sur 2 / 5 (aucun fil détecté). Ces pins n'ont pas été modifiées. Le journal contenait 164 lignes « AHT20 absent » alternant avec des mesures. Vu une fois en direct : SCL flottante (pull-down = 0) et SDA haute, scan vide, puis retour seul : faux contact probable sur le fil SCL, à confirmer. L'ancien code bloquait aussi l'AHT20 quand le BMP280 échouait et ne réinitialisait pas les modules.
 - **Valeurs fausses après rebranchement** : le BMP280 renvoyait ses registres de repos (0x80000), soit 23,8 °C et 668 hPa, plausibles mais faux. Rejetés.
+- **Écran resté noir, capteur absent** : SCL lue à 0 même avec pull-up (2026-11-07). `i2c.scan()` bloquait alors 5,6 s (112 adresses × 50 ms) toutes les 10 s : il ne restait que 4,4 s de données sans trou, et `RETOUR_PC` en demande 5. `capteur.py` sonde maintenant 3 adresses (150 ms mesurées). Vérifié sur la carte, SCL toujours bloquée : `MODE normal <- eteint (5 s)`. La cause de SCL à 0 n'est pas identifiée (câblage ou module).
 - **Agent mort** : 4 plantages natifs sur 4 dans `psutil.cpu_times` (0xC0000005) ; rien ne le relançait, et l'écran restait noir. CPU lu par `GetSystemTimes`.
 - **APK release** : plantait à chaque démarrage (`NoSuchMethodException: WorkDatabase_Impl.<init>`), R8 retirait le constructeur. Règle dans `android/app/proguard-rules.pro`.
 
@@ -34,7 +36,7 @@ Sur le release, `Log.i` n'apparaît pas dans logcat sur ce téléphone : lire le
 
 ## Capteur
 
-Période 5 s, nouvel essai à 2 s après un échec, 3 échecs de suite : bus recréé, soft reset 0xBA, 20 ms, 0xBE 08 00, config + ctrl_meas du BMP280, nouveau scan. Module absent : scan toutes les 10 s. Bornes : t -20..80, h 0..100, p 300..1100. `CLIMAT t10 h p` (h = -1 sans AHT20, p = 0 sans BMP280) ; `CLIMAT ERR absent|i2c|aberrant` au changement puis toutes les 10 s.
+Période 5 s, nouvel essai à 2 s après un échec, 3 échecs de suite : bus recréé, soft reset 0xBA, 20 ms, 0xBE 08 00, config + ctrl_meas du BMP280, nouveau scan. Module absent : sonde des 3 adresses toutes les 10 s, jamais `i2c.scan()`. Bornes : t -20..80, h 0..100, p 300..1100. `CLIMAT t10 h p` (h = -1 sans AHT20, p = 0 sans BMP280) ; `CLIMAT ERR absent|i2c|aberrant` au changement puis toutes les 10 s.
 
 ## Bouton BOOT
 
