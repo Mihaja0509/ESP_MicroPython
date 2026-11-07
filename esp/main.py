@@ -8,7 +8,9 @@
 # - Phase 10 : EVT VIDEO (scène cinéma), EVT INACTIF (scène calme), JEU_TOTAL (mode jeu).
 # - Phase 11 : MASTER {json} (scène master), MASTER_INFO ["icone", "texte"] (événement).
 # - Phase 13 : ROT_ESP 0|180 (écran retourné), CLIM / CLIMAT (clim et capteur).
+# - Phase 15 : bouton BOOT, court = capteurs réinitialisés, long (3 s) = redémarrage au relâchement.
 import json
+import os
 import select
 import sys
 import time
@@ -17,6 +19,7 @@ import machine
 
 import lcd
 from hid_pc import MEDIA, PC
+from bouton import Bouton
 from capteur import Capteur
 from meteo import Meteo
 from ui import Interface
@@ -84,10 +87,37 @@ def noter_erreur(e):
         pass
 
 
+FICHIER_REDEMARRE = "redemarre.txt"  # Phase 15 : redémarrage demandé avec le bouton BOOT
+
+
+def redemarrage_bouton():
+    """Vrai une fois après un appui long : quelqu'un est devant la carte, l'écran s'allume tout de suite."""
+    try:
+        os.remove(FICHIER_REDEMARRE)
+        return True
+    except OSError:
+        return False
+
+
+REDEMARRE = redemarrage_bouton()
 # Premier dessin tout de suite (écran noir tant que le PC ne parle pas), puis clavier/souris
+if REDEMARRE:
+    etat["eteint"] = False
+    # scène normale tout de suite, pas « PC asleep » : le PC a 20 s (12 s + 8 s) pour se manifester
+    etat["connecte"] = True
+    derniere_donnee = time.ticks_add(time.ticks_ms(), 8000)
+    ui.reagir("coucou", "Starting…", duree=8000)
 ui.dessiner(etat, time.ticks_ms())
+if REDEMARRE:
+    ecran.luminosite(etat["lum"])
 meteo = Meteo(reglages)  # lance la connexion Wi-Fi (sans attendre)
 capteur = Capteur()      # Phase 13 : AHT20 + BMP280 (silencieux si pas branché)
+bouton = Bouton(machine.Pin(0, machine.Pin.IN, machine.Pin.PULL_UP).value, time.ticks_ms())
+# écran montré de force jusque-là (réponse au bouton, même écran noir)
+message_jusqua = time.ticks_add(time.ticks_ms(), 30000) if REDEMARRE else None
+reprise_a = time.ticks_ms() if REDEMARRE else None  # prochain « REPRISE » envoyé à l'agent
+donnee_au_demarrage = derniere_donnee
+resultat_a = None        # quand annoncer le résultat de la réinitialisation des capteurs
 try:
     usb_ok = pc.demarrer()
 except Exception as e:  # le PC n'était peut-être pas prêt (démarrage de Windows)
@@ -432,6 +462,38 @@ def executer(ligne):
     return "ERR commande inconnue : " + cmd
 
 
+def suivre_bouton(maintenant):
+    """Bouton BOOT : l'écran répond toujours, même s'il était noir."""
+    global message_jusqua, resultat_a, reprise_a
+    # après un appui long, l'agent croirait à un réveil de Windows (retour USB sans utilisateur) et
+    # resterait muet : on le prévient jusqu'à ce qu'il parle (répété, le port met du temps à revenir)
+    if reprise_a is not None and time.ticks_diff(maintenant, reprise_a) >= 0:
+        if derniere_donnee != donnee_au_demarrage or message_jusqua is None:  # le PC a parlé
+            reprise_a = None
+        else:
+            print("REPRISE")
+            reprise_a = time.ticks_add(maintenant, 2000)
+    action = bouton.pas(maintenant)
+    if action == "court":
+        ui.reagir("thermo", "Sensors reset")
+        capteur.reinitialiser(maintenant)  # la mesure repart tout de suite, CLIMAT au tour suivant
+        resultat_a = time.ticks_add(maintenant, 1200)
+        message_jusqua = time.ticks_add(maintenant, 4000)
+    elif action == "long":
+        ui.reagir("power", "Restarting…", duree=600000)
+        message_jusqua = time.ticks_add(maintenant, 600000)
+    elif action == "relache":
+        try:
+            with open(FICHIER_REDEMARRE, "w") as f:
+                f.write("1")
+        except OSError:
+            pass
+        machine.reset()
+    if resultat_a is not None and time.ticks_diff(maintenant, resultat_a) >= 0:
+        resultat_a = None
+        ui.reagir("thermo", "Sensor OK" if capteur.ok else "No sensor")
+
+
 prochaine_image = time.ticks_ms()
 while True:
     try:
@@ -442,6 +504,7 @@ while True:
                 break
             print(executer(ligne.strip()))
         maintenant = time.ticks_ms()
+        suivre_bouton(maintenant)
         if capteur.pas(maintenant):
             etat["piece"] = capteur.mesure()
             if etat["piece"]:
@@ -477,13 +540,22 @@ while True:
         # 2. une nouvelle image si c'est l'heure
         if time.ticks_diff(maintenant, prochaine_image) >= 0:
             prochaine_image = time.ticks_add(maintenant, IMAGE_MS)
-            if ecran_allume:
+            force = message_jusqua is not None and time.ticks_diff(message_jusqua, maintenant) > 0
+            if not force:
+                message_jusqua = None
+            if ecran_allume or force:
+                eteint = etat["eteint"]
+                if force:
+                    etat["eteint"] = False
                 ui.dessiner(etat, maintenant)
+                etat["eteint"] = eteint
                 voulue = ui.luminosite_voulue(maintenant)
                 if voulue != luminosite_actuelle:
                     luminosite_actuelle = voulue
                     ecran.luminosite(voulue)
             else:
+                if luminosite_actuelle != -1:
+                    ecran.luminosite(0)
                 luminosite_actuelle = -1
     except Exception as e:  # une erreur ne doit jamais arrêter la télécommande
         noter_erreur(e)

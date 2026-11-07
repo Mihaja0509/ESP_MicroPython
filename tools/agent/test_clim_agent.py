@@ -77,6 +77,33 @@ class TestClimatAgent(unittest.TestCase):
         self.assertTrue(self.ag.piece_pour_app()["ok"])
 
 
+class TestChargeCPU(unittest.TestCase):
+    def test_calcul(self):
+        # noyau contient le repos : 100 de total, 25 de repos -> 75 %
+        self.assertEqual(a.pourcent_cpu((0, 0, 0), (25, 60, 40)), 75.0)
+
+    def test_pas_de_temps_ecoule(self):
+        self.assertEqual(a.pourcent_cpu((5, 5, 5), (5, 5, 5)), 0.0)
+
+    def test_releve_reel(self):
+        c = a.ChargeCPU()
+        sum(range(200000))
+        self.assertTrue(0.0 <= c.lire() <= 100.0)
+
+
+class TestReprise(unittest.TestCase):
+    """Phase 15 : REPRISE (redémarrage au bouton BOOT) sort l'agent du silence."""
+
+    def test_reprise_sort_du_silence(self):
+        ag = nouvel_agent()
+        ag.liaison.muet = True
+        ag.dernier_temps = 123.0
+        ag.meteo_envoyee = 5
+        ag.reprendre()
+        self.assertFalse(ag.liaison.muet)
+        self.assertEqual(ag.dernier_temps, 0.0)
+
+
 class TestClimAgent(unittest.TestCase):
     def setUp(self):
         Horloge.t = 1_000_000.0

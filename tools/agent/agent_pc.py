@@ -147,6 +147,37 @@ Toute autre commande (KEY win+d, TEXT …, VOL+, MOUSE 100 0, CLIC…) part à l
 # --------------------------------------------------------------------------
 # Liaison série avec l'ESP32
 # --------------------------------------------------------------------------
+def pourcent_cpu(avant, apres):
+    """Charge du processeur (%) entre deux relevés (repos, noyau, utilisateur) de GetSystemTimes.
+    Le temps « noyau » contient déjà le temps de repos."""
+    repos = apres[0] - avant[0]
+    total = (apres[1] - avant[1]) + (apres[2] - avant[2])
+    if total <= 0:
+        return 0.0
+    return max(0.0, min(100.0, 100.0 * (total - repos) / total))
+
+
+class ChargeCPU:
+    """Remplace psutil.cpu_percent : psutil.cpu_times (per_cpu_times, code natif) a fait planter
+    l'agent 4 fois sur ce PC (violation d'accès, l'agent meurt sans message)."""
+
+    def __init__(self):
+        self.avant = self._releve()
+
+    @staticmethod
+    def _releve():
+        repos, noyau, util = ctypes.c_ulonglong(), ctypes.c_ulonglong(), ctypes.c_ulonglong()
+        ctypes.windll.kernel32.GetSystemTimes(ctypes.byref(repos), ctypes.byref(noyau), ctypes.byref(util))
+        return repos.value, noyau.value, util.value
+
+    def lire(self):
+        apres = self._releve()
+        charge = pourcent_cpu(self.avant, apres)
+        self.avant = apres
+        return charge
+
+
+# --------------------------------------------------------------------------
 class Liaison:
     def __init__(self, port_force=None):
         self.port_force = port_force
@@ -1978,7 +2009,7 @@ class Agent:
                 pynvml.nvmlInit()
             except Exception as e:
                 print(f"[agent] NVIDIA indisponible : {e}")
-        psutil.cpu_percent(interval=None)
+        self.charge_cpu = ChargeCPU()
         if not est_admin():
             print("[agent] pas lancé en administrateur : les FPS ne seront pas disponibles")
         if not self.fps.demarrer():
@@ -2019,7 +2050,7 @@ class Agent:
             self._mesures_lentes()
 
         # --- mesures rapides : 4 fois par seconde ---
-        cpu = round(psutil.cpu_percent(interval=None))
+        cpu = round(self.charge_cpu.lire())
         ram = round(psutil.virtual_memory().percent)
         vol = self._garder("vol", self.audio.volume, 10)
         bat, charge = self.lent["bat"]
@@ -2568,6 +2599,9 @@ class Agent:
                 continue
             if ligne.startswith("CLIMAT "):  # mesure du capteur : pas dans le journal
                 self.lire_climat(ligne)
+                continue
+            if ligne == "REPRISE":  # Phase 15 : redémarrage au bouton BOOT, quelqu'un est devant la carte
+                self.reprendre()
                 continue
             if ligne and ligne != "OK":
                 print(f"[esp32] {ligne}")

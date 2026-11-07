@@ -64,6 +64,7 @@ class Capteur:
             maintenant = time.ticks_ms()
         self._reinit(maintenant)
         self._prochain = maintenant
+        self._err_envoyee = None  # l'erreur éventuelle repart tout de suite
         return self.ok
 
     def _reinit(self, maintenant):
