@@ -11,7 +11,10 @@ Mis à jour : 2026-11-07 · téléphone de test : Xiaomi 25113PN0EC, Android 17 
 | 15.3 | `57fce39` | `capteur.py` tolérant au débranchement, `CLIMAT ERR` |
 | 15.4 | `3f6272c` | bouton BOOT, CPU sans psutil, chien de garde de l'agent |
 | 15.2-bis | `b923a2e` | alarme de garde du service, choisir une heure active la plage |
-| 15.5 | voir `git log` | règle R8 (APK release), documentation |
+| 15.5 | `19b2bd2` | règle R8 (APK release), documentation |
+| 15.6 | `1bf8799` | l'automatisme affiche pourquoi il attend ; réactiver Auto lève la priorité manuelle ; `AutoRegles` + tests |
+
+Sur le release, `Log.i` n'apparaît pas dans logcat sur ce téléphone : lire le journal de la carte Background, la notification (`dumpsys notification --noredact`) et `agent.log`.
 
 ## Causes
 
