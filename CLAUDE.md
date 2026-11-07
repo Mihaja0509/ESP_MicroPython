@@ -129,6 +129,21 @@ Téléphone (IR + alarmes Android) ── HTTP :8765 ──> agent PC ──USB 
 - **Scène normale** : le bloc température / humidité est collé à l'heure réelle (largeur de `f_heure`), 12 px de marge avant le bord droit de la carte (`CARTE_DROITE = 185`), police la plus grande qui tient. `tools/render_scenes.py` contient les scénarios pire cas (00:00, 100 %) et contrôle la marge.
 - **Tests** : `cd tools\agent` puis `py -X utf8 -m unittest test_clim_agent test_historique` ; Dart : `minuteur_canal_test.dart`, `statut_clim_test.dart`.
 
+## Phase 15 : plage horaire, service de fond, capteur à chaud, bouton BOOT
+
+Détails et résultats de test : `docs/etat_code_phase15.md`.
+
+- **Heures fixes** : `ClimPlan.armerHeureFixe` = `setAlarmClock` (plage 103/104, minuteur 101/102), réarmement avant l'IR, à chaque ouverture de l'app, au boot, à la mise à jour, au changement d'heure ou de fuseau. Calculs purs dans `Horaire.kt` (tests : `cd app\android` puis `gradlew :app:testDebugUnitTest`). Choisir une heure active la plage.
+- **Service** : `ClimService.kt` (`specialUse`, verrou de veille partiel) tourne tant que `ClimPlan.actif` : automatisme 60 s, publication 30 s, notification (canal « AC control », boutons Turn off / Cancel timer / Pause auto 30 min → `ClimReceiver`). `ClimPlan.VERSION = 3`. État unique : préférences `clim_plan`, l'app relit `ClimPlan.etat`.
+- **HyperOS tue le service au balayage** (`SwipeUpClean`) ; les alarmes survivent. Alarme de garde 107, repoussée tant que le service vit : relance en moins de 2 min. Débogage : `adb logcat -s ClimPlan:I`, `adb shell dumpsys activity exit-info com.mmdigitek.esp_micro`, journal dans la carte Background.
+- **Carte Background** : `lib/ecrans/clim_fond.dart`, canal `fond` / `ouvrirReglage`.
+- **Capteur** : pins réelles **SDA=7 / SCL=6**. `capteur.py` : modules indépendants, 3 échecs → reset complet, scan 10 s. Série : `CLIMAT t10 h p` (h = -1 sans AHT20, p = 0 sans BMP280) ou `CLIMAT ERR absent|i2c|aberrant`. `/clim_mesure` : `{ok:false, absent:true, raison}`.
+- **Bouton BOOT** : `esp/lib/bouton.py`. Court = capteurs réinitialisés. Long 3 s = `machine.reset()` **au relâchement** (GPIO0 à 0 au reset = risque de mode flash). `redemarre.txt` + ligne `REPRISE` vers l'agent pour un retour immédiat.
+- **Écran noir après reset avec agent en PAUSE** : normal (heure inconnue, PC muet).
+- **Agent** : CPU par `GetSystemTimes` (`psutil.cpu_times` a planté 4 fois). `installer_demarrage.ps1` (administrateur) ajoute la relance chaque minute si l'agent est mort. Le relancer : `schtasks /End` puis `/Run` sur « ESP32 Telecommande Agent ».
+- **APK release** : `android/app/proguard-rules.pro` garde le constructeur Room (sinon plantage au démarrage). Toujours lancer le release une fois après l'avoir construit : l'APK debug ne passe pas par R8.
+- **Copie carte** : après chaque `fs cp`, comparer `sha256sum` ; une copie ratée laisse `main.py` et `lib/` désaccordés.
+
 ## Règles
 
 1. Appliquer **exactement** les documents de `docs\`.
