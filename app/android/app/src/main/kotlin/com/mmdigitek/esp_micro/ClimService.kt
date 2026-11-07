@@ -30,6 +30,7 @@ class ClimService : Service() {
     private lateinit var h: Handler
     private var verrou: PowerManager.WakeLock? = null
     private var prochainePub = 0L
+    private var prochainGardien = 0L
     private var derniereVue: ClimPlan.VueNotif? = null
 
     private val tic = object : Runnable {
@@ -40,8 +41,12 @@ class ClimService : Service() {
                     stopSelf()
                     return
                 }
-                ClimPlan.ticAuto(c)
                 val maintenant = System.currentTimeMillis()
+                if (maintenant >= prochainGardien) {
+                    ClimPlan.armerGardien(c)
+                    prochainGardien = maintenant + GARDIEN_REPOUSSE_MS
+                }
+                ClimPlan.ticAuto(c)
                 if (maintenant >= prochainePub) {
                     prochainePub = maintenant + if (ClimPlan.publierMaintenant(c)) PUB_MS else PUB_RETENTE_MS
                 }
@@ -90,6 +95,7 @@ class ClimService : Service() {
 
     override fun onDestroy() {
         enCours = false
+        ClimPlan.annuler(applicationContext, ClimPlan.CODE_GARDIEN) // arrêt normal : rien à relancer
         h.removeCallbacksAndMessages(null)
         fil.quitSafely()
         verrou?.takeIf { it.isHeld }?.release()
@@ -157,6 +163,7 @@ class ClimService : Service() {
         private const val TIC_MS = 10_000L
         private const val PUB_MS = 30_000L
         private const val PUB_RETENTE_MS = 10_000L
+        private const val GARDIEN_REPOUSSE_MS = 30_000L
 
         private fun creerCanal(c: Context) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

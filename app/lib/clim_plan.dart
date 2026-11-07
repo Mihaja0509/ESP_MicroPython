@@ -391,14 +391,18 @@ class _CarteClimPlanState extends State<CarteClimPlan> {
       initialTime: TimeOfDay(hour: m ~/ 60, minute: m % 60),
     );
     if (t == null) return;
+    // Phase 15 : choisir une heure active la plage. Avant, l'heure était gardée mais l'interrupteur
+    // restait éteint : aucune alarme, et rien ne se lançait à l'heure dite.
     setState(() {
       if (debut) {
         _fenDe = t.hour * 60 + t.minute;
       } else {
         _fenA = t.hour * 60 + t.minute;
       }
+      _fenActif = true;
     });
     await _sauverFenetre();
+    await _rafraichir();
   }
 
   // ------------------------------------------------------------ automatisme

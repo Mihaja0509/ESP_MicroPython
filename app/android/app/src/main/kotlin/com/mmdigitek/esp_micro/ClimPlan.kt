@@ -38,6 +38,8 @@ object ClimPlan {
     const val CODE_FEN_OFF = 104
     const val CODE_AUTO = 105
     const val CODE_REPUB = 106                      // republication de l'état au PC (toutes les 30 s)
+    const val CODE_GARDIEN = 107                    // relance le service tué par HyperOS (voir armerGardien)
+    private const val GARDIEN_MS = 2 * 60_000L
     private const val REPUB_MS = 30_000L
     private const val REPUB_RETENTE_MS = 10_000L    // l'agent n'a pas répondu : nouvelle tentative plus vite
 
@@ -273,7 +275,11 @@ object ClimPlan {
 
     // ------------------------------------------------------------------ réception des alarmes
     fun executer(c: Context, code: Int) {
-        if (code != CODE_REPUB) journal(c, "Alarm $code fired (assumed ${if (allume(c)) "on" else "off"})")
+        if (code == CODE_GARDIEN) {
+            journal(c, "Watchdog: service was killed, restarting")
+        } else if (code != CODE_REPUB) {
+            journal(c, "Alarm $code fired (assumed ${if (allume(c)) "on" else "off"})")
+        }
         // la prochaine occurrence d'abord : quoi qu'il arrive à l'IR, la plage de demain reste armée
         if (code == CODE_FEN_ON || code == CODE_FEN_OFF) rearmerFenetre(c, code)
         when (code) {
@@ -345,12 +351,21 @@ object ClimPlan {
         publier(c, attendre)
     }
 
+    /**
+     * HyperOS tue le service quand l'app est balayée des récents, sans rappel ni redémarrage. Tant
+     * qu'il vit, le service repousse cette alarme ; elle ne sonne donc que s'il est mort, et executer()
+     * le relance. Les alarmes survivent à ce kill : vu sur le téléphone (am_proc_start … broadcast).
+     */
+    fun armerGardien(c: Context) = programmer(c, CODE_GARDIEN, System.currentTimeMillis() + GARDIEN_MS)
+
     private fun synchroService(c: Context) {
         val intention = Intent(c, ClimService::class.java)
         if (!actif(c)) {
+            annuler(c, CODE_GARDIEN)
             c.stopService(intention)
             return
         }
+        armerGardien(c)
         try {
             ContextCompat.startForegroundService(c, intention)
         } catch (e: IllegalStateException) {
