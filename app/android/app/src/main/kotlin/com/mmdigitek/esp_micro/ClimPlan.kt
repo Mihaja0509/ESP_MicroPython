@@ -536,7 +536,25 @@ object ClimPlan {
         if (allume(c) != avant) publier(c, attendre = true)
     }
 
+    /** Phase 16 : mesure lue directement sur l'ESP32 (GET /mesure par Wi-Fi). null = pas réglé ou injoignable. */
+    private fun lireMesureEsp(c: Context): JSONObject? {
+        val fp = c.getSharedPreferences(VeilleurPC.PREFS, Context.MODE_PRIVATE)
+        val a = (fp.getString("flutter.esp_adresse", "") ?: "").trim()
+        if (a.isEmpty()) return null
+        return try {
+            val cn = java.net.URL("http://$a/mesure").openConnection() as java.net.HttpURLConnection
+            cn.connectTimeout = 3000
+            cn.readTimeout = 3000
+            val m = try { JSONObject(cn.inputStream.bufferedReader().readText()) } finally { cn.disconnect() }
+            if (!m.optBoolean("ok") || m.isNull("t")) return null
+            JSONObject().put("ok", true).put("t", m.getDouble("t")).put("h", if (m.isNull("h")) -1.0 else m.getDouble("h"))
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     private fun lireMesure(c: Context): JSONObject? {
+        lireMesureEsp(c)?.let { return it }
         val fp = c.getSharedPreferences(VeilleurPC.PREFS, Context.MODE_PRIVATE)
         val adresse = fp.getString("flutter.adresse", "") ?: ""
         val token = fp.getString("flutter.token", "") ?: ""

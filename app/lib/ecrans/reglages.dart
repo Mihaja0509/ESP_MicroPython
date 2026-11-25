@@ -1,5 +1,9 @@
 // Adresse du PC, appairage avec le code affiché sur l'ESP32, aide Tailscale.
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../connexion.dart';
 import '../theme.dart';
@@ -19,6 +23,8 @@ class EcranReglages extends StatefulWidget {
 class _EcranReglagesState extends State<EcranReglages> {
   late final TextEditingController _adresse;
   final _pin = TextEditingController();
+  final _esp = TextEditingController();
+  String _espInfo = '';
 
   Connexion get cx => widget.cx;
 
@@ -26,10 +32,40 @@ class _EcranReglagesState extends State<EcranReglages> {
   void initState() {
     super.initState();
     _adresse = TextEditingController(text: cx.adresse);
+    SharedPreferences.getInstance().then((p) {
+      if (mounted) _esp.text = p.getString('esp_adresse') ?? '';
+    });
+  }
+
+  /// Phase 16 : adresse Wi-Fi de l'ESP32 (/mesure). Gardée dans « flutter.esp_adresse », lue par
+  /// ClimPlan.kt (automatisme) ; le PC reste le plan B.
+  Future<void> _enregistrerEsp() async {
+    final a = _esp.text.trim();
+    final p = await SharedPreferences.getInstance();
+    if (a.isEmpty) {
+      await p.remove('esp_adresse');
+      setState(() => _espInfo = 'Removed (the PC is used instead)');
+      return;
+    }
+    await p.setString('esp_adresse', a);
+    setState(() => _espInfo = 'Testing…');
+    try {
+      final c = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+      final r = await (await c.getUrl(Uri.parse('http://$a/mesure'))).close().timeout(const Duration(seconds: 5));
+      final m = jsonDecode(await r.transform(utf8.decoder).join()) as Map;
+      c.close();
+      if (!mounted) return;
+      setState(() => _espInfo = m['ok'] == true
+          ? 'OK: ${m['t']} °C${m['h'] != null ? ' · ${m['h']} %' : ''}'
+          : 'ESP32 reached, but no measurement (sensor?)');
+    } catch (_) {
+      if (mounted) setState(() => _espInfo = 'ESP32 unreachable (same Wi-Fi? address?)');
+    }
   }
 
   @override
   void dispose() {
+    _esp.dispose();
     _adresse.dispose();
     _pin.dispose();
     super.dispose();
@@ -73,6 +109,37 @@ class _EcranReglagesState extends State<EcranReglages> {
                     onPressed: () => cx.changerAdresse(_adresse.text),
                     child: const Text('Connect'),
                   ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        Carte(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Titre('Room sensor (Wi-Fi)', icone: Icons.thermostat_rounded),
+              const Text(
+                'Address of the ESP32 on your home Wi-Fi. The AC automation reads the room '
+                'temperature straight from it, even when the PC is off.',
+                style: TextStyle(color: Couleurs.doux),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _esp,
+                keyboardType: TextInputType.url,
+                decoration: const InputDecoration(
+                  hintText: 'e.g. 192.168.100.29',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(child: Text(_espInfo, style: const TextStyle(color: Couleurs.doux))),
+                  FilledButton(onPressed: _enregistrerEsp, child: const Text('Save & test')),
                 ],
               ),
             ],
