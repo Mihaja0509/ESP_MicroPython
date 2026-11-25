@@ -12,7 +12,7 @@ import time
 from machine import I2C, Pin
 
 SDA = 7      # numéros des GPIO trouvés par tools/i2c_scan.py le 2026-11-06 (AHT20 0x38, BMP280 0x77)
-SCL = 6
+SCL = 5      # GPIO6 -> GPIO5 le 2026-11-25 (fil SCL refait, scan : AHT20 0x38 + BMP280 0x77 sur SDA 7 / SCL 5)
 DECALAGE_T = 0.0    # °C ajoutés à la mesure (la carte chauffe un peu : à régler avec un vrai thermomètre)
 PERIODE_MS = 5000
 RETENTE_MS = 2000   # après un échec : « -- » à l'écran en moins de 15 s si le capteur a vraiment disparu
