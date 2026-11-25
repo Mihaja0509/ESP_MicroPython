@@ -114,7 +114,24 @@ if REDEMARRE:
     ecran.luminosite(etat["lum"])
 meteo = Meteo(reglages)  # lance la connexion Wi-Fi (sans attendre)
 capteur = Capteur()      # Phase 13 : AHT20 + BMP280 (silencieux si pas branché)
-web = Web(reglages, meteo.connecte, capteur.mesure)  # Phase 16 : /mesure et /ir par Wi-Fi (le PC reste en USB)
+reset_demande = False
+
+
+def action_ecran(allume):
+    """Phase 16 : écran allumé / éteint depuis le téléphone (Wi-Fi)."""
+    global ecran_allume
+    ecran_allume = allume
+    if not allume:
+        ecran.luminosite(0)
+
+
+def action_reset():
+    global reset_demande
+    reset_demande = True  # le reset part après l'envoi de la réponse HTTP
+
+
+# Phase 16 : /mesure, /historique, /ir, /ecran, /redemarrer par Wi-Fi (le PC reste en USB)
+web = Web(reglages, meteo.connecte, capteur.mesure, {"ecran": action_ecran, "reset": action_reset})
 bouton = Bouton(machine.Pin(0, machine.Pin.IN, machine.Pin.PULL_UP).value, time.ticks_ms())
 # écran montré de force jusque-là (réponse au bouton, même écran noir)
 message_jusqua = time.ticks_add(time.ticks_ms(), 30000) if REDEMARRE else None
@@ -527,6 +544,10 @@ while True:
             if raison:
                 print("CLIMAT ERR %s" % raison)
         web.pas()
+        web.noter(maintenant, capteur.mesure())
+        if reset_demande:
+            time.sleep_ms(200)
+            machine.reset()
         if etat["connecte"] and time.ticks_diff(maintenant, derniere_donnee) > ATTENTE_ABSENT:
             etat["connecte"] = False
         # Phase 14-bis : plus aucune ligne CLIM depuis 2 min (PC arrêté, téléphone hors ligne…) :

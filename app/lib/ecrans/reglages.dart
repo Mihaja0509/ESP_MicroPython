@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../connexion.dart';
 import '../theme.dart';
 import '../notifications.dart';
+import 'piece.dart';
 import '../widgets/sites_video.dart';
 import '../widget_android.dart';
 
@@ -24,6 +25,8 @@ class _EcranReglagesState extends State<EcranReglages> {
   late final TextEditingController _adresse;
   final _pin = TextEditingController();
   final _esp = TextEditingController();
+  final _espToken = TextEditingController();
+  final _alerte = TextEditingController();
   String _espInfo = '';
 
   Connexion get cx => widget.cx;
@@ -33,8 +36,33 @@ class _EcranReglagesState extends State<EcranReglages> {
     super.initState();
     _adresse = TextEditingController(text: cx.adresse);
     SharedPreferences.getInstance().then((p) {
-      if (mounted) _esp.text = p.getString('esp_adresse') ?? '';
+      if (!mounted) return;
+      _esp.text = p.getString('esp_adresse') ?? '';
+      _espToken.text = p.getString('esp_token') ?? '';
+      _alerte.text = p.getString('alerte_t') ?? '';
     });
+  }
+
+  /// Commande protégée par le jeton (WEB_TOKEN de secrets.py) : /ecran?on=0|1, /redemarrer.
+  Future<void> _commandeEsp(String chemin, String ok) async {
+    final p = await SharedPreferences.getInstance();
+    final a = (p.getString('esp_adresse') ?? '').trim();
+    final t = (p.getString('esp_token') ?? '').trim();
+    if (a.isEmpty || t.isEmpty) {
+      setState(() => _espInfo = 'Set the address and the token first');
+      return;
+    }
+    try {
+      final c = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+      final req = await c.getUrl(Uri.parse('http://$a$chemin'));
+      req.headers.set('X-Token', t);
+      final r = await req.close().timeout(const Duration(seconds: 5));
+      await r.drain();
+      c.close();
+      if (mounted) setState(() => _espInfo = r.statusCode == 200 ? ok : r.statusCode == 401 ? 'Wrong token' : 'Error ${r.statusCode}');
+    } catch (_) {
+      if (mounted) setState(() => _espInfo = 'ESP32 unreachable');
+    }
   }
 
   /// Phase 16 : adresse Wi-Fi de l'ESP32 (/mesure). Gardée dans « flutter.esp_adresse », lue par
@@ -42,6 +70,13 @@ class _EcranReglagesState extends State<EcranReglages> {
   Future<void> _enregistrerEsp() async {
     final a = _esp.text.trim();
     final p = await SharedPreferences.getInstance();
+    await p.setString('esp_token', _espToken.text.trim());
+    final seuil = double.tryParse(_alerte.text.trim().replaceAll(',', '.'));
+    if (seuil == null) {
+      await p.remove('alerte_t');
+    } else {
+      await p.setString('alerte_t', seuil.toString());
+    }
     if (a.isEmpty) {
       await p.remove('esp_adresse');
       setState(() => _espInfo = 'Removed (the PC is used instead)');
@@ -66,6 +101,8 @@ class _EcranReglagesState extends State<EcranReglages> {
   @override
   void dispose() {
     _esp.dispose();
+    _espToken.dispose();
+    _alerte.dispose();
     _adresse.dispose();
     _pin.dispose();
     super.dispose();
@@ -136,10 +173,54 @@ class _EcranReglagesState extends State<EcranReglages> {
                 ),
               ),
               const SizedBox(height: 10),
+              TextField(
+                controller: _espToken,
+                obscureText: true,
+                decoration: const InputDecoration(
+                  hintText: 'Token (WEB_TOKEN of the ESP32, for screen / restart)',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _alerte,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                  hintText: 'Alert above … °C (empty = no alert)',
+                  helperText: 'The alert works while the AC service runs (automation, timer or time range on).',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: 10),
               Row(
                 children: [
                   Expanded(child: Text(_espInfo, style: const TextStyle(color: Couleurs.doux))),
                   FilledButton(onPressed: _enregistrerEsp, child: const Text('Save & test')),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                children: [
+                  OutlinedButton(
+                    onPressed: () => Navigator.of(context)
+                        .push(MaterialPageRoute(builder: (_) => const EcranPiece())),
+                    child: const Text('Room history'),
+                  ),
+                  OutlinedButton(
+                    onPressed: () => _commandeEsp('/ecran?on=0', 'Screen off'),
+                    child: const Text('ESP screen off'),
+                  ),
+                  OutlinedButton(
+                    onPressed: () => _commandeEsp('/ecran?on=1', 'Screen on'),
+                    child: const Text('ESP screen on'),
+                  ),
+                  OutlinedButton(
+                    onPressed: () => _commandeEsp('/redemarrer', 'Restarting…'),
+                    child: const Text('Restart ESP32'),
+                  ),
                 ],
               ),
             ],

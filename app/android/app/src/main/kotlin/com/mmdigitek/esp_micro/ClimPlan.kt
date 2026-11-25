@@ -531,9 +531,28 @@ object ClimPlan {
         val maintenant = System.currentTimeMillis()
         if (maintenant < autoProchain) return
         autoProchain = maintenant + AUTO_MS
+        try { alerteTemp(c) } catch (e: Exception) { journal(c, "Alert error: $e") }
         val avant = allume(c)
         auto(c)
         if (allume(c) != avant) publier(c, attendre = true)
+    }
+
+    /** Phase 16 : notification quand la pièce dépasse le seuil réglé (au plus une par 30 min,
+     *  réarmée quand la température redescend de 1 °C). Lit l'ESP32 directement. */
+    private fun alerteTemp(c: Context) {
+        val fp = c.getSharedPreferences(VeilleurPC.PREFS, Context.MODE_PRIVATE)
+        val seuil = fp.getString("flutter.alerte_t", null)?.toDoubleOrNull() ?: return
+        val t = lireMesureEsp(c)?.optDouble("t") ?: return
+        val pr = p(c)
+        val maintenant = System.currentTimeMillis()
+        if (t >= seuil) {
+            if (maintenant - pr.getLong("alerte_derniere", 0) >= 30 * 60_000L) {
+                notifier(c, "Room is %.1f °C (alert at %.1f °C)".format(t, seuil))
+                pr.edit().putLong("alerte_derniere", maintenant).apply()
+            }
+        } else if (t <= seuil - 1.0) {
+            pr.edit().putLong("alerte_derniere", 0).apply()
+        }
     }
 
     /** Phase 16 : mesure lue directement sur l'ESP32 (GET /mesure par Wi-Fi). null = pas réglé ou injoignable. */
