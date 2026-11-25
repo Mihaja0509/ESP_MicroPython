@@ -32,6 +32,26 @@ def durees(octets):
     return d
 
 
+def commande(mots):
+    """mots = [mode, temp, vent, swing 0|1, power 0|1] (tous facultatifs sauf mode et temp).
+    Envoie la trame. Renvoie None si OK, sinon le texte de l'erreur."""
+    try:
+        mode = mots[0].lower()
+        temp = int(mots[1])
+        vent = mots[2].lower() if len(mots) > 2 else "auto"
+        swing = len(mots) > 3 and mots[3] == "1"
+        power = len(mots) > 4 and mots[4] == "1"
+    except (IndexError, ValueError):
+        return "utilise : IR mode temp [vent swing power]"
+    if mode not in MODES or vent not in VENTS or not 16 <= temp <= 30:
+        return "mode cool|dry|fan|auto, vent auto|low|med|high, temp 16-30"
+    try:
+        envoyer(trame(mode, vent, temp, swing, power))
+    except Exception as e:
+        return "IR : %s" % e
+    return None
+
+
 _rmt = None
 
 

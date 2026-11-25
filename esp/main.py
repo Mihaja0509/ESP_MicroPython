@@ -22,6 +22,8 @@ from hid_pc import MEDIA, PC
 from bouton import Bouton
 from capteur import Capteur
 from meteo import Meteo
+from web import Web
+import ir
 from ui import Interface
 
 try:
@@ -112,6 +114,7 @@ if REDEMARRE:
     ecran.luminosite(etat["lum"])
 meteo = Meteo(reglages)  # lance la connexion Wi-Fi (sans attendre)
 capteur = Capteur()      # Phase 13 : AHT20 + BMP280 (silencieux si pas branché)
+web = Web(reglages, meteo.connecte, capteur.mesure)  # Phase 16 : /mesure et /ir par Wi-Fi (le PC reste en USB)
 bouton = Bouton(machine.Pin(0, machine.Pin.IN, machine.Pin.PULL_UP).value, time.ticks_ms())
 # écran montré de force jusque-là (réponse au bouton, même écran noir)
 message_jusqua = time.ticks_add(time.ticks_ms(), 30000) if REDEMARRE else None
@@ -420,6 +423,13 @@ def executer(ligne):
         except OSError:
             pass
         return "OK"
+    if cmd == "IR":
+        # IR mode temp [vent swing power] : trame York sur GPIO3 (même trame que le téléphone)
+        err = ir.commande(arg.split())
+        if err:
+            return "ERR " + err
+        ui.reagir("thermo", "IR sent")
+        return "OK"
     # --- clavier / souris / multimédia ----------------------------------------
     if not pc.is_open():
         return "ERR USB pas reconnu par le PC"
@@ -516,6 +526,7 @@ while True:
             raison = capteur.erreur_a_envoyer(maintenant)  # Phase 15 : l'agent marque la mesure absente
             if raison:
                 print("CLIMAT ERR %s" % raison)
+        web.pas()
         if etat["connecte"] and time.ticks_diff(maintenant, derniere_donnee) > ATTENTE_ABSENT:
             etat["connecte"] = False
         # Phase 14-bis : plus aucune ligne CLIM depuis 2 min (PC arrêté, téléphone hors ligne…) :
