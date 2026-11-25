@@ -2,6 +2,7 @@
 // la pièce. Tout tourne côté Android (ClimPlan.kt, alarmes exactes) : ça marche app fermée.
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -221,10 +222,45 @@ class _CarteClimPlanState extends State<CarteClimPlan> {
     _minuterie = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) _rafraichir();
     });
+    // Phase 16 : mesure lue directement sur l'ESP32 (Wi-Fi) quand le PC n'en donne pas
+    _lireEsp();
+    _minuterieEsp = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (mounted) _lireEsp();
+    });
+  }
+
+  Timer? _minuterieEsp;
+  double? _espT;
+  int _espH = -1;
+  int _espP = 0;
+
+  Future<void> _lireEsp() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      final a = (p.getString('esp_adresse') ?? '').trim();
+      if (a.isEmpty) return;
+      final c = HttpClient()..connectionTimeout = const Duration(seconds: 3);
+      final r = await (await c.getUrl(Uri.parse('http://$a/mesure'))).close().timeout(const Duration(seconds: 4));
+      final m = jsonDecode(await r.transform(utf8.decoder).join()) as Map;
+      c.close();
+      if (!mounted) return;
+      setState(() {
+        if (m['ok'] == true && m['t'] is num) {
+          _espT = (m['t'] as num).toDouble();
+          _espH = m['h'] is num ? (m['h'] as num).round() : -1;
+          _espP = m['p'] is num ? (m['p'] as num).round() : 0;
+        } else {
+          _espT = null;
+        }
+      });
+    } catch (_) {
+      if (mounted && _espT != null) setState(() => _espT = null);
+    }
   }
 
   @override
   void dispose() {
+    _minuterieEsp?.cancel();
     _minuterie?.cancel();
     _champH.dispose();
     _champM.dispose();
@@ -496,11 +532,14 @@ class _CarteClimPlanState extends State<CarteClimPlan> {
     final pauseAuto = (_rt['autoPause'] as num?)?.toInt() ?? 0;
     final enPause = pauseAuto > DateTime.now().millisecondsSinceEpoch;
     final finPause = DateTime.fromMillisecondsSinceEpoch(pauseAuto);
-    final t = e.pieceT;
+    // le PC d'abord ; sinon l'ESP32 directement (Wi-Fi), même PC éteint
+    final t = e.pieceT ?? _espT;
+    final h = e.pieceT != null ? e.pieceH : _espH;
+    final pr = e.pieceT != null ? e.pieceP : _espP;
     final piece = t == null
         ? 'Room: -- °C · -- %'
-        : 'Room: ${t.toStringAsFixed(1)} °C · ${e.pieceH >= 0 ? e.pieceH : '--'} %'
-              '${e.pieceP > 0 ? ' · ${e.pieceP} hPa' : ''}';
+        : 'Room: ${t.toStringAsFixed(1)} °C · ${h >= 0 ? h : '--'} %'
+              '${pr > 0 ? ' · $pr hPa' : ''}${e.pieceT == null ? ' (Wi-Fi)' : ''}';
     return Carte(
       jeu: widget.jeu,
       child: Column(
